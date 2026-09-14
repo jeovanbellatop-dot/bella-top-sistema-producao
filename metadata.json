@@ -1,0 +1,6 @@
+{
+  "name": "Bella Top - Sistema de Controle de Produção",
+  "description": "Sistema inteligente MES/PCP de controle de chão de fábrica para Bella Top com leitura automática de OP em PDF via IA, roteamento dinâmico de produção, filas de máquinas, apontamento de operadores, controle de perdas e cálculo de prioridades.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
