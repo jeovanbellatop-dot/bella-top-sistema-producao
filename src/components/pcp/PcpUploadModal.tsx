@@ -93,6 +93,28 @@ export const PcpUploadModal: React.FC<PcpUploadModalProps> = ({
     documentalStatusType = 'op_missing';
   }
 
+  const uploadFileToStorage = async (file: File, folder: string): Promise<string> => {
+    const dataUrl: string = await new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result as string)
+      reader.onerror = () => reject(reader.error)
+      reader.readAsDataURL(file)
+    })
+
+    const response = await fetch('/api/storage/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileName: file.name, mimeType: file.type, dataUrl, folder }),
+    })
+
+    const result = (await response.json()) as { success: boolean; error?: string; data?: { url: string } }
+    if (!response.ok || !result.success) {
+      throw new Error(result.error || 'Falha ao enviar arquivo para o Storage.')
+    }
+
+    return result.data.url as string
+  }
+
   const handleOpFileSelect = (file: File) => {
     setOpFile(file);
     setErrorMsg(null);
@@ -136,10 +158,24 @@ export const PcpUploadModal: React.FC<PcpUploadModalProps> = ({
         data.layoutPreviewImage = layoutPreviewUrl;
       }
 
-      data.opFileName = opFile.name;
-      data.op_file = opFile.name;
-      data.layoutFileName = layoutFile.name;
-      data.layout_file = layoutFile.name;
+      let opFileUrl = opFile.name
+      let layoutFileUrl = layoutFile.name
+      try {
+        const [uploadedOpUrl, uploadedLayoutUrl] = await Promise.all([
+          uploadFileToStorage(opFile, 'op-pdfs'),
+          uploadFileToStorage(layoutFile, 'layouts'),
+        ])
+        opFileUrl = uploadedOpUrl
+        layoutFileUrl = uploadedLayoutUrl
+        data.layoutPreviewImage = uploadedLayoutUrl
+      } catch (uploadErr: any) {
+        console.warn('Falha ao enviar arquivos para o Firebase Storage, usando referencia local como fallback:', uploadErr)
+      }
+
+      data.opFileName = opFile.name
+      data.op_file = opFileUrl
+      data.layoutFileName = layoutFile.name
+      data.layout_file = layoutFileUrl
       data.layoutStatus = 'COMPLETO';
       data.layout_status = 'COMPLETO';
 

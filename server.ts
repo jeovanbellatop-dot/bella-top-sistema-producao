@@ -7,6 +7,13 @@ import { RoutingEngine } from "./server/routingEngine";
 import { ServerAuditService } from "./server/auditService";
 import { getOpenAIClient, getOpenAIModel } from "./server/openaiClient";
 import { ServerAuthService } from "./server/authService";
+import {
+  runDiagnostics,
+  validateFirestoreConnectivity,
+  validateGoogleDriveConnectivity,
+} from "./server/diagnosticsTest";
+import { dbRoutes } from "./server/routes/dbRoutes";
+import { storageRoutes } from './server/routes/storageRoutes';
 
 dotenv.config();
 
@@ -217,6 +224,42 @@ app.get("/api/health", (req, res) => {
       isConfigured: !!openAiClient,
     },
   });
+});
+
+// Diagnostics & Connectivity Test endpoint (Firestore, Google Drive & Environment)
+app.get("/api/_diagnostics/test-connection", async (req, res) => {
+  try {
+    const service = (req.query.service as string)?.toLowerCase();
+    const timeoutMs = req.query.timeout ? parseInt(req.query.timeout as string, 10) : 5000;
+
+    if (service === "firestore") {
+      const result = await validateFirestoreConnectivity({ timeoutMs });
+      return res.json({
+        success: result.status !== "ERROR",
+        service: "firestore",
+        data: result,
+      });
+    }
+
+    if (service === "google_drive" || service === "drive") {
+      const result = await validateGoogleDriveConnectivity({ timeoutMs });
+      return res.json({
+        success: result.status !== "ERROR",
+        service: "google_drive",
+        data: result,
+      });
+    }
+
+    const report = await runDiagnostics({ timeoutMs });
+    return res.json(report);
+  } catch (err: any) {
+    console.error("[Diagnostics] Erro ao executar teste de conectividade:", err);
+    return res.status(500).json({
+      success: false,
+      error: err?.message || "Falha ao executar teste de diagnóstico",
+      timestamp: new Date().toISOString(),
+    });
+  }
 });
 
 // Audit logs endpoint
@@ -434,6 +477,10 @@ app.post("/api/op/parse-pdf", async (req, res) => {
     });
   }
 });
+
+// FASE 1: Montagem das rotas do Firestore no backend sob o prefixo /api/db
+app.use("/api/db", dbRoutes);
+app.use('/api/storage', storageRoutes);
 
 
 // Setup Vite middleware or static serving

@@ -67,11 +67,18 @@ class MesStore {
   private activeOperatorMachineId: string | null = null;
   private failedAttempts: Record<string, { count: number; lastAttempt: number; blockedUntil?: number }> = {};
   private listeners: Set<Listener> = new Set();
+  private sharedDataSyncTimer: ReturnType<typeof setInterval> | null = null;
+  private sharedDataSyncInFlight = false;
+  private applyingRemoteSharedData = false;
+  private ordersSyncDebounceTimer: ReturnType<typeof setTimeout> | null = null
+  private ordersSyncInFlight = false
+  private dualWriteDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     this.currentUser = INITIAL_USERS[0];
     this.loadFromStorage();
     this.recalculateAllPriorities();
+    this.startSharedDataSync();
   }
 
   private loadFromStorage() {
@@ -331,10 +338,365 @@ class MesStore {
       } else {
         localStorage.removeItem(STORAGE_KEYS.SELECTED_SECTOR);
       }
+
+      if (!this.applyingRemoteSharedData) {
+        // Dual-write assíncrono e best-effort (fire-and-forget) para o Firestore no backend (/api/db)
+        // Escopo estrito: SOMENTE máquinas e usuários. Não bloqueia a UI nem lança erro.
+        this.syncMachinesAndUsersToBackend();
+        this.syncOrdersToBackend()
+      }
     } catch {
       // ignore storage quota errors in sandbox
     }
     this.notify();
+  }
+
+  /**
+   * Dual-write assíncrono (fire-and-forget) de máquinas e usuários para o Firestore via /api/db.
+   * Não lança exceções para quem chama saveToStorage, não bloqueia o fluxo síncrono da UI
+   * e mantém o localStorage / memória como fonte primária única de leitura no frontend.
+   * Possui debounce de 2000ms para evitar requisições repetitivas a cada alteração da UI.
+   */
+  private syncMachinesAndUsersToBackend(): void {
+    if (typeof fetch === 'undefined') return;
+
+    if (this.dualWriteDebounceTimer) {
+      clearTimeout(this.dualWriteDebounceTimer);
+      this.dualWriteDebounceTimer = null;
+    }
+
+    this.dualWriteDebounceTimer = setTimeout(() => {
+      this.dualWriteDebounceTimer = null;
+      try {
+        const machinesPayload = [...this.machines];
+        const usersPayload = [...this.users];
+
+        // Executa de forma completamente desacoplada sem await bloqueante
+        Promise.allSettled([
+          // Sincronização de máquinas
+          ...machinesPayload.map((m) =>
+            fetch(`/api/db/maquinas/${encodeURIComponent(m.id)}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(m),
+            }).catch(() => {
+              // fallback silencioso se a máquina ainda não existir no Firestore
+              return fetch('/api/db/maquinas', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(m),
+              });
+            })
+          ),
+          // Sincronização de usuários
+          ...usersPayload.map((u) =>
+            fetch(`/api/db/usuarios/${encodeURIComponent(u.id)}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(u),
+            }).catch(() => {
+              // fallback silencioso se o usuário ainda não existir no Firestore
+              return fetch('/api/db/usuarios', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(u),
+              });
+            })
+          ),
+        ]).catch(() => {
+          // Silêncio total em caso de offline, quota ou erro transitório
+        });
+      } catch {
+        // Garantia absoluta de não lançamento de erros
+      }
+    }, 2000);
+  }
+
+  /**
+   * Dual write assíncrono (fire-and-forget) de Ordens de Produção para o Firestore via /api/db.
+   * Não lança exceções para quem chama saveToStorage, não bloqueia o fluxo síncrono da UI
+   * e mantém o localStorage como fonte primária. Debounce próprio, independente do debounce
+   * de máquinas/usuários, para não atrasar aquela sincronização.
+   */
+  private syncOrdersToBackend(): void {
+    if (typeof fetch === 'undefined') return
+
+    if (this.ordersSyncDebounceTimer) {
+      clearTimeout(this.ordersSyncDebounceTimer)
+      this.ordersSyncDebounceTimer = null
+    }
+
+    this.ordersSyncDebounceTimer = setTimeout(() => {
+      this.ordersSyncDebounceTimer = null
+      try {
+        const ordersPayload = [...this.orders]
+
+        // POST /api/db/ops faz upsert idempotente (set()) tanto para OPs novas quanto existentes,
+        // incluindo o array de steps. Fire-and-forget, sem await bloqueante.
+        Promise.allSettled(
+          ordersPayload.map(order =>
+            fetch(`/api/db/ops`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(order),
+            }).catch(() => {
+              // fallback silencioso se offline, quota ou erro transitório
+            })
+          )
+        ).catch(() => {
+          // Silêncio total em caso de offline, quota ou erro transitório
+        })
+      } catch {
+        // Garantia absoluta de não lançamento de erros
+      }
+    }, 2000)
+  }
+
+  /**
+   * Busca Ordens de Produção do backend (Firestore) e mescla com o estado local.
+   * Roda no mesmo ciclo de startSharedDataSync (a cada 5s), com guard próprio
+   * (ordersSyncInFlight) isolado do guard de máquinas/usuários.
+   */
+  private syncOrdersFromBackend(): void {
+    if (this.ordersSyncInFlight || typeof fetch === 'undefined') return
+
+    this.ordersSyncInFlight = true
+    fetch(`/api/db/ops`, { cache: 'no-store' })
+      .then(async (listResponse) => {
+        if (!listResponse.ok) {
+          throw new Error('Falha ao listar OPs do backend')
+        }
+        const listJson: any = await listResponse.json()
+        const opsList: any[] = Array.isArray(listJson)
+          ? listJson
+          : Array.isArray(listJson?.data)
+          ? listJson.data
+          : []
+
+        const opIds: string[] = opsList
+          .map((o: any) => o?.id)
+          .filter((id: any): id is string => typeof id === 'string')
+
+        if (opIds.length === 0) return
+
+        const detailResults = await Promise.allSettled(
+          opIds.map(id => fetch(`/api/db/ops/${encodeURIComponent(id)}`, { cache: 'no-store' }))
+        )
+
+        const remoteOrders: ProductionOrder[] = []
+        for (const result of detailResults) {
+          if (result.status !== 'fulfilled' || !result.value.ok) continue
+          try {
+            const json: any = await result.value.json()
+            const order = json && typeof json === 'object' && 'data' in json ? json.data : json
+            if (order && order.id) remoteOrders.push(order as ProductionOrder)
+          } catch {
+            // ignora item malformado
+          }
+        }
+
+        const changed = this.applyRemoteOrders(remoteOrders)
+        if (changed) {
+          this.applyingRemoteSharedData = true
+          try {
+            this.saveToStorage()
+          } finally {
+            this.applyingRemoteSharedData = false
+          }
+        }
+      })
+      .catch(() => {
+        // Silêncio total em caso de offline, quota ou erro transitório
+      })
+      .finally(() => {
+        this.ordersSyncInFlight = false
+      })
+  }
+
+  /**
+   * Mescla OPs remotas (Firestore) com o estado local. Mesmo princípio de
+   * applyRemoteSharedData: Firestore é fonte da verdade para quem já existe remotamente;
+   * mantém a versão local se ainda não sincronizada; adiciona OPs que só existem no remoto.
+   */
+  private applyRemoteOrders(remoteOrders: ProductionOrder[]): boolean {
+    let changed = false
+    if (!Array.isArray(remoteOrders) || remoteOrders.length === 0) return changed
+
+    const remoteOrdersMap = new Map<string, ProductionOrder>()
+    for (const o of remoteOrders) {
+      if (o && o.id) remoteOrdersMap.set(o.id, o)
+    }
+
+    const mergedOrders: ProductionOrder[] = []
+    const visitedOrderIds = new Set<string>()
+
+    for (const localOrder of this.orders) {
+      visitedOrderIds.add(localOrder.id)
+      const remote = remoteOrdersMap.get(localOrder.id)
+      mergedOrders.push(remote ? remote : localOrder)
+    }
+
+    for (const [remoteId, remoteOrder] of remoteOrdersMap.entries()) {
+      if (!visitedOrderIds.has(remoteId)) {
+        mergedOrders.push(remoteOrder)
+        visitedOrderIds.add(remoteId)
+      }
+    }
+
+    if (JSON.stringify(this.orders) !== JSON.stringify(mergedOrders)) {
+      this.orders = mergedOrders
+      this.recalculateAllPriorities()
+      changed = true
+    }
+
+    return changed
+  }
+
+  private startSharedDataSync(): void {
+    if (typeof fetch === 'undefined' || this.sharedDataSyncTimer) return;
+
+    this.syncSharedDataFromBackend();
+    this.syncOrdersFromBackend()
+    this.sharedDataSyncTimer = setInterval(() => {
+      this.syncSharedDataFromBackend();
+      this.syncOrdersFromBackend()
+    }, 5000);
+  }
+
+  private syncSharedDataFromBackend(): void {
+    if (this.sharedDataSyncInFlight || typeof fetch === 'undefined') return;
+
+    this.sharedDataSyncInFlight = true;
+    Promise.all([
+      fetch('/api/db/maquinas', { cache: 'no-store' }),
+      fetch('/api/db/usuarios', { cache: 'no-store' }),
+    ])
+      .then(async ([machinesResponse, usersResponse]) => {
+        if (!machinesResponse.ok || !usersResponse.ok) {
+          throw new Error('Falha ao ler dados compartilhados do Firestore.');
+        }
+
+        const [remoteMachines, remoteUsers] = await Promise.all([
+          machinesResponse.json() as Promise<Machine[]>,
+          usersResponse.json() as Promise<User[]>,
+        ]);
+
+        const changed = this.applyRemoteSharedData(remoteMachines, remoteUsers);
+        if (changed) {
+          this.applyingRemoteSharedData = true;
+          try {
+            this.saveToStorage();
+          } finally {
+            this.applyingRemoteSharedData = false;
+          }
+        }
+      })
+      .catch((error) => {
+        console.warn('[Firestore Sync] Não foi possível sincronizar usuários/máquinas.', error);
+      })
+      .finally(() => {
+        this.sharedDataSyncInFlight = false;
+      });
+  }
+
+  private applyRemoteSharedData(remoteMachines: Machine[], remoteUsers: User[]): boolean {
+    let changed = false;
+
+    const machinesList: Machine[] = Array.isArray(remoteMachines)
+      ? remoteMachines
+      : Array.isArray((remoteMachines as any)?.data)
+      ? (remoteMachines as any).data
+      : [];
+
+    if (machinesList.length > 0) {
+      const remoteMachinesMap = new Map<string, Machine>();
+      for (const m of machinesList) {
+        if (m && m.id) {
+          remoteMachinesMap.set(m.id, m);
+        }
+      }
+
+      const mergedMachines: Machine[] = [];
+      const visitedMachineIds = new Set<string>();
+
+      // Mantém versão remota se existir (Firestore fonte da verdade); senão mantém versão local
+      for (const localMachine of this.machines) {
+        visitedMachineIds.add(localMachine.id);
+        const remote = remoteMachinesMap.get(localMachine.id);
+        if (remote) {
+          mergedMachines.push(remote);
+        } else {
+          mergedMachines.push(localMachine);
+        }
+      }
+
+      // Adiciona máquinas que existam apenas no remoto
+      for (const [remoteId, remoteMachine] of remoteMachinesMap.entries()) {
+        if (!visitedMachineIds.has(remoteId)) {
+          mergedMachines.push(remoteMachine);
+          visitedMachineIds.add(remoteId);
+        }
+      }
+
+      if (JSON.stringify(this.machines) !== JSON.stringify(mergedMachines)) {
+        this.machines = mergedMachines;
+        changed = true;
+      }
+    }
+
+    const usersList: User[] = Array.isArray(remoteUsers)
+      ? remoteUsers
+      : Array.isArray((remoteUsers as any)?.data)
+      ? (remoteUsers as any).data
+      : [];
+
+    if (usersList.length > 0) {
+      const remoteUsersMap = new Map<string, User>();
+      for (const u of usersList) {
+        if (u && u.id) {
+          remoteUsersMap.set(u.id, u);
+        }
+      }
+
+      const mergedUsers: User[] = [];
+      const visitedUserIds = new Set<string>();
+
+      // Mantém versão remota se existir (Firestore fonte da verdade); senão mantém versão local
+      for (const localUser of this.users) {
+        visitedUserIds.add(localUser.id);
+        const remote = remoteUsersMap.get(localUser.id);
+        if (remote) {
+          mergedUsers.push(remote);
+        } else {
+          mergedUsers.push(localUser);
+        }
+      }
+
+      // Adiciona usuários que existam apenas no remoto
+      for (const [remoteId, remoteUser] of remoteUsersMap.entries()) {
+        if (!visitedUserIds.has(remoteId)) {
+          mergedUsers.push(remoteUser);
+          visitedUserIds.add(remoteId);
+        }
+      }
+
+      if (JSON.stringify(this.users) !== JSON.stringify(mergedUsers)) {
+        this.users = mergedUsers;
+        changed = true;
+      }
+
+      if (this.authenticatedUser) {
+        const refreshedUser = this.users.find((u) => u.id === this.authenticatedUser?.id);
+        if (refreshedUser) {
+          this.authenticatedUser = refreshedUser;
+          this.currentUser = refreshedUser;
+        } else {
+          console.warn('[Firestore Sync] Usuário autenticado não encontrado no snapshot remoto; mantendo sessão local.');
+        }
+      }
+    }
+
+    return changed;
   }
 
   public subscribe(listener: Listener) {

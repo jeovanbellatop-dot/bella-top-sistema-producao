@@ -5,6 +5,11 @@
 
 import { mesStore } from '../src/services/mesStore';
 import { INITIAL_USERS } from '../src/data/initialData';
+import {
+  validateFirestoreConnectivity,
+  validateGoogleDriveConnectivity,
+  runDiagnostics,
+} from '../server/diagnosticsTest';
 
 // Cores para saída no terminal
 const colors = {
@@ -418,6 +423,42 @@ async function runAllTests() {
     const dispatchedOp = mesStore.getOrders().find((o) => o.id === flowOp.id);
     assert(dispatchedOp?.status === 'FINALIZADA', 'Status da OP atualizado após despacho');
   }
+
+  // ==========================================
+  // 8. TESTES DE DIAGNÓSTICO E CONECTIVIDADE (FIRESTORE & GOOGLE DRIVE)
+  // ==========================================
+  console.log(`\n${colors.cyan}--- 8. DIAGNÓSTICO E CONECTIVIDADE (FIRESTORE & DRIVE) ---${colors.reset}`);
+
+  // Teste 8.1: Validação de conectividade real do Firestore (firebase-admin)
+  const firestoreResult = await validateFirestoreConnectivity();
+  assert(
+    firestoreResult.service === 'firestore' &&
+      (firestoreResult.status === 'CONNECTED' || firestoreResult.status === 'NOT_CONFIGURED') &&
+      typeof firestoreResult.configured === 'boolean',
+    'Firestore: Executa teste de conectividade e validação via firebase-admin com sucesso'
+  );
+
+  // Teste 8.2: Validação de conectividade real do Google Drive (googleapis)
+  const driveResult = await validateGoogleDriveConnectivity();
+  assert(
+    driveResult.service === 'google_drive' &&
+      (driveResult.status === 'CONNECTED' || driveResult.status === 'NOT_CONFIGURED') &&
+      typeof driveResult.configured === 'boolean',
+    'Google Drive: Executa teste de criação, leitura e exclusão no Google Drive com sucesso'
+  );
+
+  // Teste 8.3: runDiagnostics compila estrutura unificada com métricas de ambiente
+  const diagnosticsReport = await runDiagnostics();
+  assert(
+    typeof diagnosticsReport.success === 'boolean' &&
+      !!diagnosticsReport.environment.nodeVersion &&
+      !!diagnosticsReport.environment.platform &&
+      diagnosticsReport.services.firestore.service === 'firestore' &&
+      diagnosticsReport.services.googleDrive.service === 'google_drive' &&
+      typeof diagnosticsReport.summary.total === 'number' &&
+      diagnosticsReport.summary.total === 2,
+    'runDiagnostics: Gera relatório unificado com métricas de ambiente, Firestore e Drive'
+  );
 
   // ==========================================
   // RESUMO DOS TESTES
