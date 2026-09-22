@@ -68,6 +68,10 @@ export function useMesStore() {
     openMachineMaintenanceCall: mesStore.openMachineMaintenanceCall.bind(mesStore),
     closeMachineMaintenanceCall: mesStore.closeMachineMaintenanceCall.bind(mesStore),
     getMachineQueue: mesStore.getMachineQueue.bind(mesStore),
+
+    // Sincronização com o Firestore — erro visível em vez de falha silenciosa
+    ordersSyncError: mesStore.getOrdersSyncError(),
+    clearOrdersSyncError: mesStore.clearOrdersSyncError.bind(mesStore),
     markAlertRead: mesStore.markAlertRead.bind(mesStore),
     markAllAlertsRead: mesStore.markAllAlertsRead.bind(mesStore),
     resetToDemoData: mesStore.resetToDemoData.bind(mesStore),

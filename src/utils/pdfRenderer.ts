@@ -1,16 +1,29 @@
 import * as pdfjsLib from 'pdfjs-dist';
+// O worker é resolvido pelo Vite em tempo de build (?url). Isso funciona tanto no
+// servidor de desenvolvimento quanto no app publicado.
+// ANTES: o caminho '/node_modules/pdfjs-dist/...' só existe em desenvolvimento e
+// resultava em 404 no app publicado, derrubando toda a leitura de PDF.
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import type { LoadedFile } from './loadedFile';
 
-// Configuração local do worker do pdfjs para rodar em build de produção sem CDN externa
 if (typeof window !== 'undefined' && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
-  try {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-      'pdfjs-dist/build/pdf.worker.min.mjs',
-      import.meta.url
-    ).href;
-  } catch {
-    // Fallback em caso de restrição de import.meta.url
-    pdfjsLib.GlobalWorkerOptions.workerSrc = '/node_modules/pdfjs-dist/build/pdf.worker.min.mjs';
-  }
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+}
+
+/** Entrada aceita pelo renderizador: arquivo já lido em memória ou buffer bruto. */
+export type DocumentInput = LoadedFile | ArrayBuffer;
+
+function inputName(input: DocumentInput): string {
+  return input instanceof ArrayBuffer ? 'documento' : input.name;
+}
+
+function inputBuffer(input: DocumentInput): ArrayBuffer {
+  return input instanceof ArrayBuffer ? input : input.buffer;
+}
+
+function inputIsPdf(input: DocumentInput): boolean {
+  if (input instanceof ArrayBuffer) return true;
+  return input.type === 'application/pdf' || input.name.toLowerCase().endsWith('.pdf');
 }
 
 export interface RenderedPdfResult {
@@ -26,23 +39,20 @@ export interface RenderedPdfResult {
  * Lê e converte um arquivo PDF ou Imagem em imagem de visualização de alta resolução (PNG)
  * e extrai o texto contido em todas as páginas do PDF.
  */
-export async function processDocumentFile(file: File): Promise<RenderedPdfResult> {
-  if (!file) {
+export async function processDocumentFile(input: DocumentInput): Promise<RenderedPdfResult> {
+  if (!input) {
     throw new Error('Nenhum arquivo foi selecionado ou fornecido para processamento.');
   }
 
-  const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-
   try {
-    if (isPdf) {
-      return await renderPdfToImageAndText(file);
-    } else {
-      return await processImageFile(file);
+    if (inputIsPdf(input)) {
+      return await renderPdfToImageAndText(input);
     }
+    return await processImageFile(input as LoadedFile);
   } catch (err: any) {
     console.error('[pdfRenderer] Erro ao processar documento:', err);
     throw new Error(
-      `Não foi possível abrir o arquivo "${file.name}": ${err?.message || 'Formato incompatível ou arquivo corrompido'}`
+      `Não foi possível abrir o arquivo "${inputName(input)}": ${err?.message || 'Formato incompatível ou arquivo corrompido'}`
     );
   }
 }
@@ -51,13 +61,16 @@ export async function processDocumentFile(file: File): Promise<RenderedPdfResult
  * Renderiza a primeira página do PDF para Canvas e exporta como PNG de alta resolução,
  * extraindo também todo o texto de todas as páginas do PDF.
  */
-export async function renderPdfToImageAndText(file: File | ArrayBuffer): Promise<RenderedPdfResult> {
-  const arrayBuffer = file instanceof File ? await file.arrayBuffer() : file;
+export async function renderPdfToImageAndText(input: DocumentInput): Promise<RenderedPdfResult> {
+  // O buffer já foi lido uma única vez na seleção do arquivo (ver loadFileOnce).
+  // Copiamos o buffer porque o pdf.js assume a posse do Uint8Array que recebe,
+  // e o mesmo LoadedFile ainda será usado para upload e envio ao backend.
+  const arrayBuffer = inputBuffer(input).slice(0);
 
   try {
     const loadingTask = pdfjsLib.getDocument({
       data: new Uint8Array(arrayBuffer),
-      useWorkerFetch: true,
+      useWorkerFetch: false,
     });
 
     const pdfDoc = await loadingTask.promise;
@@ -107,7 +120,8 @@ export async function renderPdfToImageAndText(file: File | ArrayBuffer): Promise
 
     await firstPage.render(renderContext).promise;
 
-    const dataUrl = canvas.toDataURL('image/png', 0.95);
+    // PNG não usa parâmetro de qualidade; mantido sem o segundo argumento para não iludir.
+    const dataUrl = canvas.toDataURL('image/png');
     const rawBase64 = dataUrl.split(',')[1] || '';
 
     return {
@@ -120,37 +134,33 @@ export async function renderPdfToImageAndText(file: File | ArrayBuffer): Promise
     };
   } catch (err: any) {
     console.error('[pdfRenderer] Erro ao renderizar PDF:', err);
-    throw new Error(`Falha na conversão do PDF (${file instanceof File ? file.name : 'documento'}): ${err?.message || 'Arquivo corrompido ou formato incompatível'}`);
+    throw new Error(`Falha na conversão do PDF (${inputName(input)}): ${err?.message || 'Arquivo corrompido ou formato incompatível'}`);
   }
 }
 
 /**
  * Processa arquivos de imagem direta (PNG, JPEG, WEBP)
  */
-export async function processImageFile(file: File): Promise<RenderedPdfResult> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const dataUrl = e.target?.result as string;
-      const rawBase64 = dataUrl.split(',')[1] || '';
+export async function processImageFile(loaded: LoadedFile): Promise<RenderedPdfResult> {
+  // Nenhuma releitura do arquivo aqui: o dataUrl já veio pronto de loadFileOnce().
+  const dataUrl = loaded.dataUrl;
+  const rawBase64 = loaded.base64;
 
-      const img = new Image();
-      img.onload = () => {
-        resolve({
-          dataUrl,
-          rawBase64,
-          width: img.width,
-          height: img.height,
-          numPages: 1,
-          textContent: '',
-        });
-      };
-      img.onerror = () => {
-        reject(new Error(`Imagem inválida ou corrompida: ${file.name}`));
-      };
-      img.src = dataUrl;
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      resolve({
+        dataUrl,
+        rawBase64,
+        width: img.width,
+        height: img.height,
+        numPages: 1,
+        textContent: '',
+      });
     };
-    reader.onerror = (err) => reject(err);
-    reader.readAsDataURL(file);
+    img.onerror = () => {
+      reject(new Error(`Imagem inválida ou corrompida: ${loaded.name}`));
+    };
+    img.src = dataUrl;
   });
 }

@@ -30,6 +30,7 @@ import { FullLayoutModal } from './FullLayoutModal';
 import { PcpManualReviewForm } from './PcpManualReviewForm';
 import { CropBox, createBellaTopBagSvg } from '../../utils/imageCropper';
 import { processDocumentFile } from '../../utils/pdfRenderer';
+import { loadFileOnce, type LoadedFile } from '../../utils/loadedFile';
 
 interface PcpUploadModalProps {
   isOpen: boolean;
@@ -44,8 +45,11 @@ export const PcpUploadModal: React.FC<PcpUploadModalProps> = ({
 }) => {
   const { createOrderFromExtracted, generateRouteForOpData, machines, logAudit } = useMesStore();
 
-  const [opFile, setOpFile] = useState<File | null>(null);
-  const [layoutFile, setLayoutFile] = useState<File | null>(null);
+  // Os arquivos são lidos UMA ÚNICA VEZ no momento da seleção (loadFileOnce) e
+  // guardados já materializados em memória. Guardar o objeto File cru e lê-lo
+  // depois é o que causava o erro NotFoundError, sobretudo no celular.
+  const [opFile, setOpFile] = useState<LoadedFile | null>(null);
+  const [layoutFile, setLayoutFile] = useState<LoadedFile | null>(null);
   const [layoutPreviewUrl, setLayoutPreviewUrl] = useState<string | null>(null);
 
   const [isProcessing, setIsProcessing] = useState(false);
@@ -93,18 +97,12 @@ export const PcpUploadModal: React.FC<PcpUploadModalProps> = ({
     documentalStatusType = 'op_missing';
   }
 
-  const uploadFileToStorage = async (file: File, folder: string): Promise<string> => {
-    const dataUrl: string = await new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(reader.result as string)
-      reader.onerror = () => reject(reader.error)
-      reader.readAsDataURL(file)
-    })
-
+  const uploadFileToStorage = async (file: LoadedFile, folder: string): Promise<string> => {
+    // Sem releitura do arquivo: o dataUrl foi gerado na seleção.
     const response = await fetch('/api/storage/upload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fileName: file.name, mimeType: file.type, dataUrl, folder }),
+      body: JSON.stringify({ fileName: file.name, mimeType: file.type, dataUrl: file.dataUrl, folder }),
     })
 
     const result = (await response.json()) as { success: boolean; error?: string; data?: { url: string } }
@@ -115,16 +113,30 @@ export const PcpUploadModal: React.FC<PcpUploadModalProps> = ({
     return result.data.url as string
   }
 
-  const handleOpFileSelect = (file: File) => {
-    setOpFile(file);
+  const handleOpFileSelect = async (file: File) => {
     setErrorMsg(null);
+    try {
+      setOpFile(await loadFileOnce(file));
+    } catch (err: any) {
+      setOpFile(null);
+      setErrorMsg(err?.message || 'Não foi possível ler o arquivo da Ordem de Produção.');
+    }
   };
 
   const handleLayoutFileSelect = async (file: File) => {
-    setLayoutFile(file);
     setErrorMsg(null);
+    let loaded: LoadedFile;
     try {
-      const rendered = await processDocumentFile(file);
+      loaded = await loadFileOnce(file);
+    } catch (err: any) {
+      setLayoutFile(null);
+      setErrorMsg(err?.message || 'Não foi possível ler o arquivo do Layout.');
+      return;
+    }
+
+    setLayoutFile(loaded);
+    try {
+      const rendered = await processDocumentFile(loaded);
       setLayoutPreviewUrl(rendered.dataUrl);
     } catch (err: any) {
       console.warn('Não foi possível gerar pré-visualização imediata do layout:', err);

@@ -482,6 +482,21 @@ app.post("/api/op/parse-pdf", async (req, res) => {
 app.use("/api/db", dbRoutes);
 app.use('/api/storage', storageRoutes);
 
+// Endpoint de diagnóstico rápido de ambiente
+app.get("/api/_envcheck", (req, res) => {
+  let pid = "nenhuma chave";
+  try {
+    pid = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY || "{}").project_id || "sem project_id";
+  } catch (e) {
+    pid = "json invalido";
+  }
+  res.json({
+    projectIdDaChave: pid,
+    temKey: Boolean(process.env.GOOGLE_SERVICE_ACCOUNT_KEY),
+    storageBucketEnv: process.env.FIREBASE_STORAGE_BUCKET || null,
+  });
+});
+
 
 // Setup Vite middleware or static serving
 async function startServer() {

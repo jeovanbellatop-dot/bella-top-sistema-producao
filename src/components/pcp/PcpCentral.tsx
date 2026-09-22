@@ -13,7 +13,9 @@ import {
   ArrowRight,
   TrendingUp,
   Sparkles,
-  Eye
+  Eye,
+  CloudOff,
+  X
 } from 'lucide-react';
 import { PriorityBadge } from '../dashboard/FactoryOverview';
 import { PriorityLevel, ProductionOrder } from '../../types/mes';
@@ -26,7 +28,7 @@ interface PcpCentralProps {
 }
 
 export const PcpCentral: React.FC<PcpCentralProps> = ({ onOpenUpload, onSelectOp }) => {
-  const { orders } = useMesStore();
+  const { orders, ordersSyncError, clearOrdersSyncError } = useMesStore();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPriority, setSelectedPriority] = useState<string>('ALL');
@@ -48,6 +50,33 @@ export const PcpCentral: React.FC<PcpCentralProps> = ({ onOpenUpload, onSelectOp
 
   return (
     <div className="space-y-6 pb-16 max-w-7xl mx-auto">
+      {/* Aviso real de falha de gravação no servidor.
+          Antes esse erro era engolido em silêncio e a OP parecia salva,
+          mesmo nunca tendo chegado ao Firestore. */}
+      {ordersSyncError && (
+        <div
+          role="alert"
+          className="flex items-start gap-3 bg-[#FDECEF] border border-[#E30A78] text-[#8A0A47] p-4 rounded-2xl"
+        >
+          <CloudOff className="w-5 h-5 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-extrabold">Ordem de Produção não gravada no servidor</p>
+            <p className="text-xs mt-1 break-words">{ordersSyncError}</p>
+            <p className="text-xs mt-1 font-semibold">
+              Enquanto isso, a OP existe apenas neste aparelho e não aparece para os operadores.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={clearOrdersSyncError}
+            aria-label="Dispensar aviso"
+            className="shrink-0 p-1 rounded-lg hover:bg-[#F7D5DF] transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Header Banner */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white border border-[#E5DAD3] p-5 rounded-2xl">
         <div>

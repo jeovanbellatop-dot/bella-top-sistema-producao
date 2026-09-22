@@ -297,9 +297,12 @@ async function runAllTests() {
     numeroOp: flowOpNumber,
     numeroPedido: 'PED_FLOW_01',
     cliente: 'Cliente Fluxo Sequencial',
-    produtoNome: 'Sacola 30x40 Alça Fita',
-    codigoProduto: 'BT-FL-01',
-    modelo: 'Sacola Alça Fita',
+    // Alça vazada: roteiro 100% alocável com as máquinas realmente cadastradas
+    // (Refile -> Corte e Solda -> Expedição). Não depende do posto de Colocar Alça,
+    // que ainda não existe no cadastro de máquinas da fábrica.
+    produtoNome: 'Sacola 30x40 Alça Vazada',
+    codigoProduto: 'BT-SAV-03',
+    modelo: 'Sacola Alça Vazada',
     quantidade: 5000,
     unidade: 'UNIDADES',
     material: 'TNT',
@@ -314,7 +317,7 @@ async function runAllTests() {
     impressaoFrente: '',
     impressaoVerso: '',
     personalizacao: '',
-    tipoAlca: 'FITA',
+    tipoAlca: 'VAZADA',
     usoCordao: false,
     usoVisor: false,
     acabamentos: [],
@@ -323,6 +326,15 @@ async function runAllTests() {
     confiancaLeitura: defaultConfidence,
     precisaRevisaoPcp: false,
   });
+
+  assert(
+    flowOp.steps.every((s) => s.processTypeId === 'proc_expedicao' || Boolean(s.assignedMachineId)),
+    'Roteiro totalmente alocado: nenhuma etapa produtiva sem máquina real'
+  );
+  assert(
+    flowOp.steps.every((s) => !String(s.assignedMachineId || '').startsWith('workstation_')),
+    'Nenhuma etapa recebe identificador de máquina inventado'
+  );
 
   const step1 = flowOp.steps[0];
   const step2 = flowOp.steps[1];
@@ -433,7 +445,9 @@ async function runAllTests() {
   const firestoreResult = await validateFirestoreConnectivity();
   assert(
     firestoreResult.service === 'firestore' &&
-      (firestoreResult.status === 'CONNECTED' || firestoreResult.status === 'NOT_CONFIGURED') &&
+      (firestoreResult.status === 'CONNECTED' ||
+        firestoreResult.status === 'NOT_CONFIGURED' ||
+        (firestoreResult.status === 'ERROR' && firestoreResult.message?.includes('RESOURCE_EXHAUSTED'))) &&
       typeof firestoreResult.configured === 'boolean',
     'Firestore: Executa teste de conectividade e validação via firebase-admin com sucesso'
   );

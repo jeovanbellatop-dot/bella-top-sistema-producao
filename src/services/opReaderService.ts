@@ -1,6 +1,7 @@
 import { ExtractedOpData } from '../types/mes';
 import { processDocumentFile } from '../utils/pdfRenderer';
 import { cropImageFromCoords, getDefaultLayoutCropBox, CropBox } from '../utils/imageCropper';
+import { loadFileOnce, type LoadedFile } from '../utils/loadedFile';
 
 export interface ParseOpResponse {
   success: boolean;
@@ -10,8 +11,9 @@ export interface ParseOpResponse {
 }
 
 export interface ParseOpFilesParams {
-  opFile: File;
-  layoutFile: File;
+  /** Arquivos JÁ LIDOS em memória (loadFileOnce), nunca o objeto File cru. */
+  opFile: LoadedFile;
+  layoutFile: LoadedFile;
 }
 
 /**
@@ -34,7 +36,7 @@ export async function parseOpFiles({
 
     // 2. Montar os payloads com o base64 original, imagem PNG renderizada e o texto extraído
     const opDoc = {
-      base64: await fileToBase64(opFile),
+      base64: opFile.base64,
       mimeType: opFile.type || 'application/pdf',
       fileName: opFile.name,
       textContent: opProcessed.textContent,
@@ -43,7 +45,7 @@ export async function parseOpFiles({
     };
 
     const layoutDoc = {
-      base64: await fileToBase64(layoutFile),
+      base64: layoutFile.base64,
       mimeType: layoutFile.type || (layoutFile.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'),
       fileName: layoutFile.name,
       textContent: layoutProcessed.textContent,
@@ -136,11 +138,13 @@ export async function parseOpDocument(
       const files = Array.isArray(fileOrText) ? fileOrText : [fileOrText];
       const documents = await Promise.all(
         files.map(async (file) => {
-          const processed = await processDocumentFile(file);
+          // Uma única leitura do arquivo, reaproveitada em todas as etapas.
+          const loaded = await loadFileOnce(file);
+          const processed = await processDocumentFile(loaded);
           return {
-            base64: await fileToBase64(file),
-            mimeType: file.type || 'application/pdf',
-            fileName: file.name,
+            base64: loaded.base64,
+            mimeType: loaded.type,
+            fileName: loaded.name,
             textContent: processed.textContent,
             previewImage: processed.dataUrl,
           };
@@ -166,16 +170,4 @@ export async function parseOpDocument(
     console.error('Falha no leitor de OP:', error);
     throw error;
   }
-}
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      resolve(result.includes(',') ? result.split(',')[1] : result);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
 }

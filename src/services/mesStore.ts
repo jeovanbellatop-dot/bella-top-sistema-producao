@@ -68,6 +68,20 @@ class MesStore {
   private failedAttempts: Record<string, { count: number; lastAttempt: number; blockedUntil?: number }> = {};
   private listeners: Set<Listener> = new Set();
   private sharedDataSyncTimer: ReturnType<typeof setInterval> | null = null;
+  /**
+   * Último erro real de gravação de OP no Firestore.
+   * ANTES este erro era engolido por um .catch(() => {}) silencioso: o Firestore
+   * recusava a OP (documento acima de 1 MiB) e a tela continuava dizendo que
+   * tinha salvado, porque o localStorage aceitava. Agora o erro fica visível.
+   */
+  private lastOrdersSyncError: string | null = null;
+  /**
+   * Sombra da última versão conhecida de cada OP, usada para carimbar updatedAt
+   * apenas nas OPs que realmente mudaram. Sem esse carimbo, a mesclagem entre
+   * dispositivos era "quem grava por último vence", e o tablet do PCP apagava o
+   * apontamento que o operador tinha acabado de fazer.
+   */
+  private orderShadow: Map<string, string> = new Map();
   private sharedDataSyncInFlight = false;
   private applyingRemoteSharedData = false;
   private ordersSyncDebounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -299,11 +313,20 @@ class MesStore {
       this.authenticatedUser = null;
       this.activeOperatorMachineId = null;
     }
+
+    // Sombra inicial: o que veio do disco não é alteração, não carimba updatedAt.
+    this.resetOrderShadow();
   }
 
   private saveToStorage() {
     try {
       if (typeof localStorage === 'undefined') return;
+
+      // Carimba updatedAt nas OPs alteradas ANTES de persistir e de enviar ao backend.
+      // Dados vindos do Firestore já trazem o próprio carimbo e não são recarimbados.
+      if (!this.applyingRemoteSharedData) {
+        this.stampUpdatedAtOnChangedOrders();
+      }
       localStorage.setItem(STORAGE_KEYS.MACHINES, JSON.stringify(this.machines));
       localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(this.products));
       localStorage.setItem(STORAGE_KEYS.PROCESSES, JSON.stringify(this.processTypes));
@@ -434,18 +457,46 @@ class MesStore {
         // POST /api/db/ops faz upsert idempotente (set()) tanto para OPs novas quanto existentes,
         // incluindo o array de steps. Fire-and-forget, sem await bloqueante.
         Promise.allSettled(
-          ordersPayload.map(order =>
-            fetch(`/api/db/ops`, {
+          ordersPayload.map(async order => {
+            const response = await fetch(`/api/db/ops`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(order),
-            }).catch(() => {
-              // fallback silencioso se offline, quota ou erro transitório
             })
-          )
-        ).catch(() => {
-          // Silêncio total em caso de offline, quota ou erro transitório
-        })
+
+            if (!response.ok) {
+              let detail = `HTTP ${response.status}`
+              try {
+                const body = await response.json()
+                if (body?.error) detail = String(body.error)
+              } catch {
+                // corpo não-JSON: mantém o código HTTP
+              }
+              throw new Error(`OP ${order.opNumber || order.id}: ${detail}`)
+            }
+          })
+        )
+          .then(results => {
+            const failures = results
+              .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+              .map(r => (r.reason instanceof Error ? r.reason.message : String(r.reason)))
+
+            const previous = this.lastOrdersSyncError
+            if (failures.length > 0) {
+              const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false
+              this.lastOrdersSyncError = isOffline
+                ? 'Sem conexão: as Ordens de Produção ainda não foram gravadas no servidor.'
+                : `${failures.length} Ordem(ns) de Produção não foram gravadas no servidor. ${failures[0]}`
+              console.error('[Firestore Sync] Falha ao gravar OPs:', failures)
+            } else {
+              this.lastOrdersSyncError = null
+            }
+
+            if (previous !== this.lastOrdersSyncError) this.notify()
+          })
+          .catch(() => {
+            // Promise.allSettled não rejeita; guarda defensiva apenas.
+          })
       } catch {
         // Garantia absoluta de não lançamento de erros
       }
@@ -533,7 +584,26 @@ class MesStore {
     for (const localOrder of this.orders) {
       visitedOrderIds.add(localOrder.id)
       const remote = remoteOrdersMap.get(localOrder.id)
-      mergedOrders.push(remote ? remote : localOrder)
+
+      if (!remote) {
+        // Ainda não propagada para o Firestore: preserva a versão local.
+        mergedOrders.push(localOrder)
+        continue
+      }
+
+      // Resolução de conflito por carimbo de hora. ANTES o remoto sempre vencia,
+      // o que fazia o dispositivo do PCP sobrescrever o apontamento recém-feito
+      // pelo operador — a OP "voltava" ao estado anterior ao trocar de tela.
+      const localStamp = localOrder.updatedAt || ''
+      const remoteStamp = remote.updatedAt || ''
+
+      if (localStamp && remoteStamp && localStamp > remoteStamp) {
+        mergedOrders.push(localOrder)
+      } else if (localStamp && !remoteStamp) {
+        mergedOrders.push(localOrder)
+      } else {
+        mergedOrders.push(remote)
+      }
     }
 
     for (const [remoteId, remoteOrder] of remoteOrdersMap.entries()) {
@@ -546,6 +616,8 @@ class MesStore {
     if (JSON.stringify(this.orders) !== JSON.stringify(mergedOrders)) {
       this.orders = mergedOrders
       this.recalculateAllPriorities()
+      // A mesclagem não é edição do usuário: realinha a sombra sem recarimbar.
+      this.resetOrderShadow()
       changed = true
     }
 
@@ -697,6 +769,47 @@ class MesStore {
     }
 
     return changed;
+  }
+
+  /** Serializa a OP ignorando o próprio carimbo, para detectar mudança real de conteúdo. */
+  private serializeOrderForShadow(order: ProductionOrder): string {
+    const { updatedAt: _ignored, ...rest } = order as any;
+    return JSON.stringify(rest);
+  }
+
+  /** Reconstrói a sombra sem carimbar nada (usado ao carregar e ao aplicar dados remotos). */
+  private resetOrderShadow(): void {
+    this.orderShadow = new Map();
+    for (const order of this.orders) {
+      this.orderShadow.set(order.id, this.serializeOrderForShadow(order));
+    }
+  }
+
+  /** Carimba updatedAt apenas nas OPs cujo conteúdo mudou desde a última gravação. */
+  private stampUpdatedAtOnChangedOrders(): void {
+    const now = new Date().toISOString();
+    for (const order of this.orders) {
+      const serialized = this.serializeOrderForShadow(order);
+      const previous = this.orderShadow.get(order.id);
+      if (previous !== undefined && previous === serialized) continue;
+
+      if (previous !== undefined || !order.updatedAt) {
+        order.updatedAt = now;
+      }
+      this.orderShadow.set(order.id, this.serializeOrderForShadow(order));
+    }
+  }
+
+  /** Erro visível de sincronização de OPs com o Firestore (null quando tudo certo). */
+  public getOrdersSyncError(): string | null {
+    return this.lastOrdersSyncError;
+  }
+
+  public clearOrdersSyncError(): void {
+    if (this.lastOrdersSyncError !== null) {
+      this.lastOrdersSyncError = null;
+      this.notify();
+    }
   }
 
   public subscribe(listener: Listener) {
@@ -2197,6 +2310,8 @@ class MesStore {
       machineId: string;
       machineName: string;
       estimatedMinutes: number;
+      /** true quando nenhuma máquina compatível foi encontrada para o processo. */
+      needsMachineAllocation?: boolean;
     }>;
     identifiedProductId: string;
     productName: string;
@@ -2406,8 +2521,13 @@ class MesStore {
       return {
         processTypeId: procId,
         processName: procType.name,
-        machineId: selectedMachine ? selectedMachine.id : `workstation_${procId}`,
+        // NUNCA inventar um identificador de máquina. Antes era `workstation_${procId}`,
+        // que não corresponde a nenhuma máquina real: a etapa entrava na fila de uma
+        // máquina inexistente e ficava invisível para todos os operadores, para sempre.
+        // Sem máquina compatível, a etapa fica sem alocação e a OP vai para revisão do PCP.
+        machineId: selectedMachine ? selectedMachine.id : '',
         machineName: selectedMachine ? selectedMachine.name : fallbackMachineName,
+        needsMachineAllocation: !selectedMachine,
         estimatedMinutes: Math.max(20, estMinutes),
         hasCord: procId === 'proc_solda' ? Boolean(hasCord) : undefined,
       };
@@ -2432,6 +2552,7 @@ class MesStore {
       machineId: string;
       machineName: string;
       estimatedMinutes: number;
+      needsMachineAllocation?: boolean;
     }>
   ): ProductionOrder {
     if (!opData.numeroOp || !opData.numeroOp.trim()) {
@@ -2472,20 +2593,29 @@ class MesStore {
       opData.acabamentos?.some((a) => a.toLowerCase().includes('cordão') || a.toLowerCase().includes('fio'))
     );
 
+    // Etapas sem máquina compatível (fora Expedição, que é manual por natureza).
+    // A OP não pode seguir para o chão de fábrica com etapa órfã: vai para revisão do PCP.
+    const stepsMissingMachine = route.steps.filter(
+      (s) => s.processTypeId !== 'proc_expedicao' && (!s.machineId || (s as any).needsMachineAllocation)
+    );
+    const requiresPcpReview = Boolean(opData.precisaRevisaoPcp) || stepsMissingMachine.length > 0;
+
     // Build operation steps with initial physical quantities
     const steps: OperationStep[] = route.steps.map((s, idx) => {
       const isFirst = idx === 0;
       const isExpedicao = s.processTypeId === 'proc_expedicao';
       const isSolda = s.processTypeId === 'proc_solda';
+      const missingMachine = !isExpedicao && (!s.machineId || Boolean((s as any).needsMachineAllocation));
       return {
         id: `step_${opData.numeroOp}_${idx + 1}`,
         opId: newOpId,
         sequenceIndex: idx,
         processTypeId: s.processTypeId,
         processName: s.processName,
-        assignedMachineId: isExpedicao ? null : s.machineId,
+        assignedMachineId: isExpedicao || missingMachine ? null : s.machineId,
         assignedMachineName: isExpedicao ? 'Expedição Manual' : s.machineName,
-        status: isFirst ? (opData.precisaRevisaoPcp ? 'AGUARDANDO_ANTERIOR' : 'PRONTA') : 'AGUARDANDO_ANTERIOR',
+        needsMachineAllocation: missingMachine || undefined,
+        status: isFirst ? (requiresPcpReview ? 'AGUARDANDO_ANTERIOR' : 'PRONTA') : 'AGUARDANDO_ANTERIOR',
         isManual: isExpedicao,
         responsibleUser: isExpedicao ? 'Carlos' : undefined,
         responsibleSector: isExpedicao ? 'EXPEDICAO' : undefined,
@@ -2548,7 +2678,7 @@ class MesStore {
       estimatedCompletionDate: new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString(),
       safetyMarginHours: 36,
       priority: 'VERDE',
-      status: opData.precisaRevisaoPcp ? 'REVISAO_PCP' : 'PROGRAMADA',
+      status: requiresPcpReview ? 'REVISAO_PCP' : 'PROGRAMADA',
       currentStepIndex: 0,
       steps,
       createdAt: new Date().toISOString(),
@@ -2576,7 +2706,11 @@ class MesStore {
             explanation: opData.routingExplanation,
           }
         : undefined,
-      revisionNotes: opData.precisaRevisaoPcp
+      revisionNotes: stepsMissingMachine.length > 0
+        ? `Revisão do PCP necessária: nenhuma máquina compatível foi encontrada para ${stepsMissingMachine
+            .map((s) => s.processName)
+            .join(', ')}. Defina a máquina antes de liberar a OP para a fábrica.`
+        : opData.precisaRevisaoPcp
         ? 'Revisão do PCP necessária: dados com baixa confiança ou inconsistência detectada na OP.'
         : undefined,
     };

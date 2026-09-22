@@ -309,6 +309,8 @@ export interface OperationStep {
   processTypeId: string;
   processName: string;
   assignedMachineId?: string | null;
+  /** true quando nenhuma máquina compatível foi encontrada: exige alocação manual do PCP. */
+  needsMachineAllocation?: boolean;
   assignedMachineName: string;
   status: OperationStatus;
   isManual?: boolean;
@@ -403,6 +405,8 @@ export interface ProductionOrder {
   createdAt: string;
   completedAt?: string;
   createdBy: string;
+  /** Carimbo da última alteração. Usado para resolver conflito entre dispositivos. */
+  updatedAt?: string;
   sourcePdfName?: string;
   opFileName?: string;
   op_file?: string;

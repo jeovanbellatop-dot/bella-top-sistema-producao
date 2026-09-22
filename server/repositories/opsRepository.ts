@@ -1,4 +1,5 @@
 import { getFirestoreDb } from '../firebaseAdmin';
+import { sanitizeOrderMedia, assertFitsFirestoreDocument } from '../utils/opMedia';
 import type { ProductionOrder, OperationStep, PriorityLevel } from '../../src/types/mes';
 
 /**
@@ -51,7 +52,22 @@ export const opsRepository = {
    */
   async createOp(order: ProductionOrder): Promise<ProductionOrder> {
     const firestore = getFirestoreDb();
-    const { steps = [], ...opWithoutSteps } = order;
+    const { steps = [], ...rawOpWithoutSteps } = order;
+
+    // Move imagens embutidas (data:) para o Storage antes de gravar.
+    // Sem isso o documento estoura o limite de 1 MiB do Firestore e a OP nunca é salva.
+    const { order: opWithoutSteps, movedFields, droppedFields } =
+      await sanitizeOrderMedia(rawOpWithoutSteps);
+
+    if (movedFields.length > 0) {
+      console.log(`[opsRepository] OP ${order.id}: mídia movida para o Storage -> ${movedFields.join(', ')}`);
+    }
+    if (droppedFields.length > 0) {
+      console.warn(`[opsRepository] OP ${order.id}: mídia descartada (Storage indisponível) -> ${droppedFields.join(', ')}`);
+    }
+
+    // Falha explícita e legível em vez de erro genérico do SDK.
+    assertFitsFirestoreDocument(opWithoutSteps, `A Ordem de Produção ${order.opNumber || order.id}`);
 
     const opRef = firestore.collection('ops').doc(order.id);
     await opRef.set(opWithoutSteps);
@@ -59,13 +75,14 @@ export const opsRepository = {
     if (steps.length > 0) {
       const batch = firestore.batch();
       for (const step of steps) {
+        assertFitsFirestoreDocument(step, `A etapa ${step.processName || step.id} da OP ${order.opNumber || order.id}`);
         const stepRef = opRef.collection('etapas').doc(step.id);
         batch.set(stepRef, step);
       }
       await batch.commit();
     }
 
-    return order;
+    return { ...(opWithoutSteps as any), steps } as ProductionOrder;
   },
 
   /**
