@@ -2772,12 +2772,34 @@ class MesStore {
       );
     }
 
-    const route = customSteps
+    // Quando o PCP define o roteiro na mao, ainda precisamos do blueprint para
+    // registrar cordao/produto na OP. A validacao do PCP ja aconteceu na tela,
+    // entao needsPcpValidation nao pode reabrir a revisao nesse caminho.
+    const manualBlueprint: RouteBlueprint | null = customSteps
+      ? {
+          ...buildRouteBlueprint({
+            productName: opData.produtoNome,
+            productCode: opData.codigoProduto,
+            model: opData.modelo,
+            client: opData.cliente,
+            printingMethod: opData.tipoImpressao,
+            handleType: opData.tipoAlca,
+            hasCord: opData.usoCordao,
+            cordMode: opData.tipoCordao,
+            hasWindow: opData.usoVisor,
+            productKeyOverride: opData.produtoConfirmadoPcp || opData.produtoSugeridoIa,
+          }),
+          needsPcpValidation: false,
+        }
+      : null;
+
+    const route = customSteps && manualBlueprint
       ? {
           steps: customSteps,
           identifiedProductId: opData.codigoProduto || 'prod_sacola_alca_fita',
           productName: opData.produtoNome,
           productCode: opData.codigoProduto || 'BT-01',
+          blueprint: manualBlueprint,
         }
       : this.generateRouteForOpData(opData);
 

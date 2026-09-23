@@ -596,6 +596,8 @@ Retorne ESTRITAMENTE em formato JSON com o seguinte schema:
         handle_type: { value: handleType, confidence: handleType !== 'NAO_IDENTIFICADO' ? 0.95 : 0.0 },
         has_window: { value: hasVisor, confidence: 0.95 },
         has_cord: { value: hasCordao, confidence: 0.95 },
+        cord_mode: { value: 'NAO_IDENTIFICADO', confidence: 0.0 },
+        product_type: { value: 'NAO_IDENTIFICADO', confidence: 0.0 },
         printing_method: { value: printMethod, confidence: printMethod !== 'NAO_IDENTIFICADO' ? 0.92 : 0.0 },
         printing_colors: { value: printingColors, confidence: colorsMatch ? 0.90 : 0.70 },
         deadline: { value: deadlineMatch ? new Date().toISOString() : new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString(), confidence: deadlineMatch ? 0.90 : 0.70 },
