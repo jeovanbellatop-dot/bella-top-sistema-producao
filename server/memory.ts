@@ -77,21 +77,53 @@ DIRETRIZ MÁXIMA DA INTELIGÊNCIA
    - Conferência final do layout aprovado, contagem de lotes, embalagem e expedição.
 
 ==================================================
-2. FLUXO-BASE DA PRODUÇÃO (ROTEIRO SEQUENCIAL)
+2. FLUXO-BASE DA PRODUCAO (REGRA OFICIAL)
 ==================================================
-REFILE
-  ↓
-IMPRESSÃO (Flexografia ou Carrossel - apenas quando houver impressão)
-  ↓
-CORTE E SOLDA (Máquina 2, 3 ou 4)
-  ↓
-PROCESSOS INTERMEDIÁRIOS (Passar Fio - apenas quando houver cordão)
-  ↓
-ALÇA / ACABAMENTO (Apenas quando alça fita / acabamento manual)
-  ↓
-EXPEDIÇÃO
+REGRA MESTRA: REFILE **XOR** FLEXOGRAFIA.
+- A OP passa pela Flexografia OU pelo Refile no inicio. Nunca pelos dois.
+- Flexografia e impressao em bobina. Refile prepara/corta o material na medida.
+- Flexografia e Carrossel/Estamparia sao alternativas de impressao: a mesma OP
+  NUNCA passa pelos dois para a mesma impressao.
 
-O roteiro é DINÂMICO: nunca inserir etapas desnecessárias.
+CAMINHO A - impressao em FLEXOGRAFIA:
+  FLEXOGRAFIA -> CORTE E SOLDA -> (etapas seguintes do produto) -> EXPEDICAO
+
+CAMINHO B - impressao em CARROSSEL / ESTAMPARIA / SERIGRAFIA:
+  REFILE -> CORTE E SOLDA -> CARROSSEL/ESTAMPARIA -> (etapas seguintes) -> EXPEDICAO
+  (no caminho B a impressao acontece DEPOIS do corte e solda)
+
+CAMINHO C - sem impressao (material liso):
+  REFILE -> CORTE E SOLDA -> (etapas seguintes) -> EXPEDICAO
+
+Se nao for possivel identificar com seguranca qual caminho usar:
+  needs_pcp_validation: true. NUNCA escolher por suposicao.
+
+ETAPAS POSTERIORES, NA ORDEM: COSTURA -> CORDAO MANUAL -> ALCA -> EXPEDICAO.
+
+CORDAO - dois processos diferentes:
+- CORDAO AUTOMATICO: aplicado pela propria maquina no Corte e Solda.
+  Nao cria etapa. Exige a Maquina 3.
+- CORDAO MANUAL: aplicado depois, em posto proprio. CRIA a etapa Cordao Manual,
+  antes da Alca e antes da Expedicao. Nao exige a Maquina 3.
+- Clientes/marcas com regra fixa de CORDAO MANUAL: Arezzo, Anacapri e Sonho dos Pes.
+  Nessas OPs cord_mode = MANUAL sempre, e isso deve aparecer na OP como 'Cordao: Manual'.
+- Se a OP indica cordao mas nao diz se e manual ou automatico: needs_pcp_validation: true.
+
+ROTEIRO POR PRODUTO (product_type):
+- SACOLA_ALCA_FITA (com ou sem fundo): leva etapa de ALCA. Fundo nao muda o roteiro.
+- SACOLA_ALCA_VAZADA (com ou sem fundo): NAO leva etapa de alca.
+- SACO_TNT (com visor ou sem visor): nao leva alca. O visor NAO cria etapa,
+  mas define compatibilidade de maquina no Corte e Solda.
+- MOCHILINHA: sempre CORDAO MANUAL. Sem etapa de alca.
+- SACOLA_PRESENTE: sempre CORDAO MANUAL e depois ALCA.
+- SACO_PRESENTE: sempre CORDAO MANUAL. Sem alca.
+- SACOLA_BOX: leva COSTURA e depois ALCA.
+- LIXO_CAR: mesma logica da alca vazada.
+- ECOBAG_ALGODAO: ja chega pronta. Somente ESTAMPARIA -> EXPEDICAO.
+- SAQUINHO_ALGODAO: fabricacao inicial terceirizada.
+  TERCEIRIZADO -> ESTAMPARIA -> EXPEDICAO.
+
+O roteiro e DINAMICO: nunca inserir etapa desnecessaria e nunca omitir etapa exigida.
 
 ==================================================
 3. IMAGENS E SEPARAÇÃO DE ARQUIVOS
@@ -142,4 +174,13 @@ Você deve extrair e estruturar rigorosamente:
 18. deadline (data ISO ou formato legível)
 19. priority ("VERDE", "AMARELO", "VERMELHO")
 20. notes (observações técnicas)
+21. product_type (SACOLA_ALCA_FITA, SACOLA_ALCA_VAZADA, SACO_TNT, MOCHILINHA,
+    SACOLA_PRESENTE, SACO_PRESENTE, SACOLA_BOX, ECOBAG_ALGODAO, LIXO_CAR,
+    SAQUINHO_ALGODAO ou NAO_IDENTIFICADO)
+22. cord_mode (AUTOMATICO, MANUAL, NENHUM ou NAO_IDENTIFICADO)
+23. requires_sewing (true somente quando o produto exige costura)
+24. outsourced (true quando a fabricacao inicial e terceirizada)
+
+REGRA DE SEGURANCA: qualquer um destes quatro campos ambiguo ->
+needs_pcp_validation: true. A IA nao decide roteiro por suposicao.
 `;

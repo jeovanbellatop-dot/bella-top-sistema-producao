@@ -4,7 +4,7 @@
  */
 
 import { mesStore } from '../src/services/mesStore';
-import { INITIAL_USERS } from '../src/data/initialData';
+import { INITIAL_USERS, buildRouteBlueprint } from '../src/data/initialData';
 import {
   validateFirestoreConnectivity,
   validateGoogleDriveConnectivity,
@@ -439,6 +439,141 @@ async function runAllTests() {
   // ==========================================
   // 8. TESTES DE DIAGNÓSTICO E CONECTIVIDADE (FIRESTORE & GOOGLE DRIVE)
   // ==========================================
+  // ==========================================
+  // 7.9 ROTEIRO OFICIAL POR PRODUTO (REFILE XOR FLEXOGRAFIA)
+  // ==========================================
+  console.log(`\n${colors.cyan}--- 7.9 ROTEIRO OFICIAL POR PRODUTO ---${colors.reset}`);
+
+  const rota = (entrada: any) => buildRouteBlueprint(entrada).processIds.join(' -> ');
+
+  const cenarios: Array<{ nome: string; entrada: any; esperado: string }> = [
+    {
+      nome: 'Sacola Alça Fita + Flexografia',
+      entrada: { productName: 'Sacola Alça Fita', printingMethod: 'FLEXOGRAFIA', handleType: 'FITA' },
+      esperado: 'proc_flexografia -> proc_solda -> proc_colocar_alca -> proc_expedicao',
+    },
+    {
+      nome: 'Sacola Alça Fita + Carrossel',
+      entrada: { productName: 'Sacola Alça Fita', printingMethod: 'SERIGRAFIA', handleType: 'FITA' },
+      esperado: 'proc_refile -> proc_solda -> proc_serigrafia -> proc_colocar_alca -> proc_expedicao',
+    },
+    {
+      nome: 'Sacola Alça Fita com Fundo + Flexografia (fundo não muda o roteiro)',
+      entrada: { productName: 'Sacola Alça Fita com Fundo', printingMethod: 'FLEXOGRAFIA', handleType: 'FITA' },
+      esperado: 'proc_flexografia -> proc_solda -> proc_colocar_alca -> proc_expedicao',
+    },
+    {
+      nome: 'Alça Vazada + Flexografia',
+      entrada: { productName: 'Sacola Alça Vazada', printingMethod: 'FLEXOGRAFIA', handleType: 'VAZADA' },
+      esperado: 'proc_flexografia -> proc_solda -> proc_expedicao',
+    },
+    {
+      nome: 'Alça Vazada + Carrossel',
+      entrada: { productName: 'Sacola Alça Vazada', printingMethod: 'CARROSSEL', handleType: 'VAZADA' },
+      esperado: 'proc_refile -> proc_solda -> proc_serigrafia -> proc_expedicao',
+    },
+    {
+      nome: 'Saco de TNT com visor + Flexografia (visor não cria etapa)',
+      entrada: { productName: 'Saco de TNT com Visor', printingMethod: 'FLEXOGRAFIA', hasWindow: true },
+      esperado: 'proc_flexografia -> proc_solda -> proc_expedicao',
+    },
+    {
+      nome: 'Mochilinha + Flexografia (sempre cordão manual)',
+      entrada: { productName: 'Mochilinha', printingMethod: 'FLEXOGRAFIA' },
+      esperado: 'proc_flexografia -> proc_solda -> proc_passar_fio -> proc_expedicao',
+    },
+    {
+      nome: 'Sacola de Presente + Carrossel (cordão manual antes da alça)',
+      entrada: { productName: 'Sacola de Presente', printingMethod: 'SERIGRAFIA' },
+      esperado: 'proc_refile -> proc_solda -> proc_serigrafia -> proc_passar_fio -> proc_colocar_alca -> proc_expedicao',
+    },
+    {
+      nome: 'Saco de Presente + Flexografia',
+      entrada: { productName: 'Saco de Presente', printingMethod: 'FLEXOGRAFIA' },
+      esperado: 'proc_flexografia -> proc_solda -> proc_passar_fio -> proc_expedicao',
+    },
+    {
+      nome: 'Sacola Box + Flexografia (costura antes da alça)',
+      entrada: { productName: 'Sacola Box', printingMethod: 'FLEXOGRAFIA', handleType: 'FITA' },
+      esperado: 'proc_flexografia -> proc_solda -> proc_costura -> proc_colocar_alca -> proc_expedicao',
+    },
+    {
+      nome: 'Sacola Box + Carrossel',
+      entrada: { productName: 'Sacola Box', printingMethod: 'CARROSSEL', handleType: 'FITA' },
+      esperado: 'proc_refile -> proc_solda -> proc_serigrafia -> proc_costura -> proc_colocar_alca -> proc_expedicao',
+    },
+    {
+      nome: 'Ecobag de Algodão (chega pronta)',
+      entrada: { productName: 'Ecobag de Algodão', printingMethod: 'SERIGRAFIA' },
+      esperado: 'proc_serigrafia -> proc_expedicao',
+    },
+    {
+      nome: 'Lixo Car + Flexografia (igual alça vazada)',
+      entrada: { productName: 'Lixo Car', printingMethod: 'FLEXOGRAFIA' },
+      esperado: 'proc_flexografia -> proc_solda -> proc_expedicao',
+    },
+    {
+      nome: 'Saquinho de Algodão (terceirizado)',
+      entrada: { productName: 'Saquinho de Algodão', printingMethod: 'SERIGRAFIA' },
+      esperado: 'proc_terceirizado -> proc_serigrafia -> proc_expedicao',
+    },
+    {
+      nome: 'Sacola lisa sem impressão começa pelo Refile',
+      entrada: { productName: 'Sacola Alça Vazada', printingMethod: 'SEM_IMPRESSAO', handleType: 'VAZADA' },
+      esperado: 'proc_refile -> proc_solda -> proc_expedicao',
+    },
+  ];
+
+  cenarios.forEach((c) => {
+    const obtido = rota(c.entrada);
+    assert(obtido === c.esperado, `Roteiro: ${c.nome}`, `Esperado: ${c.esperado} | Obtido: ${obtido}`);
+  });
+
+  // Clientes com regra fixa de cordão manual
+  ['Arezzo', 'Anacapri', 'Sonho dos Pés'].forEach((marca) => {
+    const bp = buildRouteBlueprint({
+      productName: 'Saco de TNT sem visor',
+      printingMethod: 'FLEXOGRAFIA',
+      client: marca + ' Indústria e Comércio',
+      hasCord: true,
+    });
+    assert(
+      bp.cordMode === 'MANUAL' && bp.cordForcedByClient && bp.processIds.includes('proc_passar_fio'),
+      `Cordão manual automático para o cliente ${marca}`,
+      `cordMode: ${bp.cordMode} | rota: ${bp.processIds.join(' -> ')}`
+    );
+  });
+
+  // Flexografia nunca recebe Carrossel, e Carrossel sempre começa pelo Refile
+  const bpFlex = buildRouteBlueprint({ productName: 'Sacola Alça Fita', printingMethod: 'FLEXOGRAFIA', handleType: 'FITA' });
+  assert(
+    !bpFlex.processIds.includes('proc_serigrafia') && !bpFlex.processIds.includes('proc_refile'),
+    'REFILE XOR FLEXOGRAFIA: OP de Flexografia não recebe Refile nem Carrossel',
+    bpFlex.processIds.join(' -> ')
+  );
+  const bpCarr = buildRouteBlueprint({ productName: 'Sacola Alça Fita', printingMethod: 'CARROSSEL', handleType: 'FITA' });
+  assert(
+    bpCarr.processIds[0] === 'proc_refile' && !bpCarr.processIds.includes('proc_flexografia'),
+    'REFILE XOR FLEXOGRAFIA: OP de Carrossel começa pelo Refile e não recebe Flexografia',
+    bpCarr.processIds.join(' -> ')
+  );
+
+  // Cordão automático não cria etapa e continua exigindo a Máquina 3
+  const bpAuto = buildRouteBlueprint({ productName: 'Saco de TNT sem visor', printingMethod: 'FLEXOGRAFIA', hasCord: true, cordMode: 'AUTOMATICO' });
+  assert(
+    bpAuto.cordMode === 'AUTOMATICO' && !bpAuto.processIds.includes('proc_passar_fio'),
+    'Cordão automático não cria etapa separada',
+    bpAuto.processIds.join(' -> ')
+  );
+
+  // Informação crítica ambígua vai para o PCP
+  const bpDuvida = buildRouteBlueprint({ productName: 'Sacola', printingMethod: '', handleType: '' });
+  assert(
+    bpDuvida.needsPcpValidation && bpDuvida.warnings.length > 0,
+    'Produto e impressão ambíguos marcam a OP para REVISAO_PCP',
+    JSON.stringify(bpDuvida.warnings)
+  );
+
   console.log(`\n${colors.cyan}--- 8. DIAGNÓSTICO E CONECTIVIDADE (FIRESTORE & DRIVE) ---${colors.reset}`);
 
   // Teste 8.1: Validação de conectividade real do Firestore (firebase-admin)

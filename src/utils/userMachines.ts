@@ -28,6 +28,12 @@ export function matchSectorCode(machineSector?: string, sectorCode?: SystemSecto
       return sec.includes('corte') || sec.includes('solda') || sec.includes('cs');
     case 'ALCA':
       return sec.includes('alca') || sec.includes('acabam');
+    case 'CORDAO_MANUAL':
+      return sec.includes('cordao') || sec.includes('fio');
+    case 'COSTURA':
+      return sec.includes('costur');
+    case 'TERCEIRIZADO':
+      return sec.includes('terceir');
     case 'EXPEDICAO':
       return sec.includes('exped');
     case 'PCP':

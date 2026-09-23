@@ -13,6 +13,7 @@ import {
   validateGoogleDriveConnectivity,
 } from "./server/diagnosticsTest";
 import { dbRoutes } from "./server/routes/dbRoutes";
+import { warmUpLiveMirrors } from "./server/firebaseAdmin";
 import { storageRoutes } from './server/routes/storageRoutes';
 
 dotenv.config();
@@ -291,6 +292,8 @@ app.post("/api/op/route-preview", (req, res) => {
       printingMethod = "FLEXOGRAFIA",
       printingColors = 1,
       finishing = [],
+      client = "",
+      cordMode = "",
     } = req.body;
 
     const result = RoutingEngine.computeRoute({
@@ -310,6 +313,8 @@ app.post("/api/op/route-preview", (req, res) => {
       printingMethod,
       printingColors,
       finishing,
+      client,
+      cordMode,
     });
 
     res.json({
@@ -422,6 +427,10 @@ app.post("/api/op/parse-pdf", async (req, res) => {
       personalizacao: structuredResult.op.print_front,
       tipoAlca: structuredResult.op.handle_type,
       usoCordao: structuredResult.op.has_cord,
+      tipoCordao: (structuredResult.op as any).cord_mode,
+      produtoSugeridoIa: (structuredResult.op as any).product_type,
+      necessitaCostura: (structuredResult.op as any).requires_sewing,
+      necessitaTerceirizacao: (structuredResult.op as any).outsourced,
       usoVisor: structuredResult.op.has_window,
       acabamentos: structuredResult.op.finishing,
       observacoesTecnicas: structuredResult.op.notes,
@@ -512,6 +521,13 @@ async function startServer() {
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
+  }
+
+  // Sobe os espelhos vivos do Firestore antes de atender os aparelhos.
+  try {
+    warmUpLiveMirrors();
+  } catch (err: any) {
+    console.error("[Bella Top MES] Espelhos do Firestore nao iniciaram:", err?.message || err);
   }
 
   app.listen(PORT, "0.0.0.0", () => {

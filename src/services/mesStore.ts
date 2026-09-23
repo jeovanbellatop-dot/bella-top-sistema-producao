@@ -25,8 +25,10 @@ import {
   INITIAL_USERS,
   INITIAL_ORDERS,
   INITIAL_AUDIT_LOGS,
-  INITIAL_ALERTS
+  INITIAL_ALERTS,
+  buildRouteBlueprint
 } from '../data/initialData';
+import type { RouteBlueprint } from '../data/initialData';
 import { hashPassword, generateSalt, verifyPassword, normalizeUsername } from '../utils/authCrypto';
 import { isUserAuthorizedForMachine, getActiveAdministrators } from '../utils/userMachines';
 
@@ -86,12 +88,24 @@ class MesStore {
   private applyingRemoteSharedData = false;
   private ordersSyncDebounceTimer: ReturnType<typeof setTimeout> | null = null
   private ordersSyncInFlight = false
+  /** OPs alteradas neste aparelho e ainda nao confirmadas no servidor. */
+  private pendingOrderPushIds: Set<string> = new Set()
+  /** Aviso visivel quando outro aparelho gravou a mesma OP ao mesmo tempo. */
+  private lastOrdersConflict: string | null = null
+  /** Registros de historico (auditoria, paradas, alertas) ja confirmados no servidor. */
+  private syncedHistoryIds: Set<string> = new Set()
+  private historyPushInFlight = false
+  private historyPullInFlight = false
+  /** Ultima versao de cada maquina/usuario ja enviada ao servidor por este aparelho. */
+  private machineShadow: Map<string, string> = new Map()
+  private userShadow: Map<string, string> = new Map()
   private dualWriteDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     this.currentUser = INITIAL_USERS[0];
     this.loadFromStorage();
     this.recalculateAllPriorities();
+    this.releaseMachinesWithFinishedSteps();
     this.startSharedDataSync();
   }
 
@@ -316,6 +330,9 @@ class MesStore {
 
     // Sombra inicial: o que veio do disco não é alteração, não carimba updatedAt.
     this.resetOrderShadow();
+    // Primeira carga do aparelho: tudo que existe aqui entra na fila de envio.
+    // O servidor rejeita (409) qualquer copia mais antiga que a dele.
+    for (const order of this.orders) this.pendingOrderPushIds.add(order.id);
   }
 
   private saveToStorage() {
@@ -366,6 +383,7 @@ class MesStore {
         // Dual-write assíncrono e best-effort (fire-and-forget) para o Firestore no backend (/api/db)
         // Escopo estrito: SOMENTE máquinas e usuários. Não bloqueia a UI nem lança erro.
         this.syncMachinesAndUsersToBackend();
+      this.syncHistoryToBackend();
         this.syncOrdersToBackend()
       }
     } catch {
@@ -391,8 +409,18 @@ class MesStore {
     this.dualWriteDebounceTimer = setTimeout(() => {
       this.dualWriteDebounceTimer = null;
       try {
-        const machinesPayload = [...this.machines];
-        const usersPayload = [...this.users];
+        const machinesPayload = this.machines.filter(
+          (mac) => this.machineShadow.get(mac.id) !== JSON.stringify(mac)
+        );
+        const usersPayload = this.users.filter(
+          (usr) => this.userShadow.get(usr.id) !== JSON.stringify(usr)
+        );
+
+        // Nada mudou neste aparelho: nao reenvia a fabrica inteira a cada acao.
+        if (machinesPayload.length === 0 && usersPayload.length === 0) return;
+
+        machinesPayload.forEach((mac) => this.machineShadow.set(mac.id, JSON.stringify(mac)));
+        usersPayload.forEach((usr) => this.userShadow.set(usr.id, JSON.stringify(usr)));
 
         // Executa de forma completamente desacoplada sem await bloqueante
         Promise.allSettled([
@@ -452,7 +480,10 @@ class MesStore {
     this.ordersSyncDebounceTimer = setTimeout(() => {
       this.ordersSyncDebounceTimer = null
       try {
-        const ordersPayload = [...this.orders]
+        const idsToPush = new Set(this.pendingOrderPushIds)
+        const ordersPayload = this.orders.filter(o => idsToPush.has(o.id))
+        if (ordersPayload.length === 0) return
+        idsToPush.forEach(id => this.pendingOrderPushIds.delete(id))
 
         // POST /api/db/ops faz upsert idempotente (set()) tanto para OPs novas quanto existentes,
         // incluindo o array de steps. Fire-and-forget, sem await bloqueante.
@@ -463,6 +494,17 @@ class MesStore {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(order),
             })
+
+            if (response.status === 409) {
+              // Outro aparelho gravou uma versao mais nova desta OP ao mesmo tempo.
+              // O proximo ciclo de leitura traz o estado do servidor, entao o
+              // operador precisa saber que o apontamento dele foi substituido.
+              this.lastOrdersConflict = `A OP ${order.opNumber || order.id} foi alterada por outro dispositivo ao mesmo tempo. O sistema carregou a versao do servidor - confira o apontamento desta OP.`
+              this.notify()
+              // Outro dispositivo ja gravou uma versao mais nova desta OP.
+              // Nao e erro: o proximo ciclo de leitura traz o estado correto.
+              return
+            }
 
             if (!response.ok) {
               let detail = `HTTP ${response.status}`
@@ -481,6 +523,8 @@ class MesStore {
               .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
               .map(r => (r.reason instanceof Error ? r.reason.message : String(r.reason)))
 
+            if (failures.length > 0) idsToPush.forEach(id => this.pendingOrderPushIds.add(id))
+
             const previous = this.lastOrdersSyncError
             if (failures.length > 0) {
               const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false
@@ -489,7 +533,7 @@ class MesStore {
                 : `${failures.length} Ordem(ns) de Produção não foram gravadas no servidor. ${failures[0]}`
               console.error('[Firestore Sync] Falha ao gravar OPs:', failures)
             } else {
-              this.lastOrdersSyncError = null
+              this.lastOrdersSyncError = this.lastOrdersConflict
             }
 
             if (previous !== this.lastOrdersSyncError) this.notify()
@@ -524,9 +568,16 @@ class MesStore {
           ? listJson.data
           : []
 
+        const localStamps = new Map(this.orders.map(o => [o.id, String(o.updatedAt || '')]))
         const opIds: string[] = opsList
-          .map((o: any) => o?.id)
-          .filter((id: any): id is string => typeof id === 'string')
+          .filter((o: any) => {
+            if (!o || typeof o.id !== 'string') return false
+            const localStamp = localStamps.get(o.id)
+            // Carrega o detalhe apenas de OPs novas ou realmente alteradas no servidor.
+            if (localStamp === undefined) return true
+            return String(o.updatedAt || '') !== localStamp
+          })
+          .map((o: any) => o.id as string)
 
         if (opIds.length === 0) return
 
@@ -547,6 +598,12 @@ class MesStore {
         }
 
         const changed = this.applyRemoteOrders(remoteOrders)
+        const machinesFreed = this.releaseMachinesWithFinishedSteps()
+        if (machinesFreed) {
+          // Gravacao normal (sem flag de remoto) para que a liberacao da maquina
+          // tambem suba para o servidor e valha para os outros aparelhos.
+          this.saveToStorage()
+        }
         if (changed) {
           this.applyingRemoteSharedData = true
           try {
@@ -632,6 +689,13 @@ class MesStore {
     this.sharedDataSyncTimer = setInterval(() => {
       this.syncSharedDataFromBackend();
       this.syncOrdersFromBackend()
+      this.syncHistoryFromBackend()
+      this.syncHistoryToBackend()
+      // Varredura de seguranca a cada ciclo: nenhum posto pode continuar preso
+      // a uma etapa ja finalizada. E o que fazia a OP voltar para o operador.
+      if (this.releaseMachinesWithFinishedSteps()) {
+        this.saveToStorage()
+      }
     }, 5000);
   }
 
@@ -768,6 +832,20 @@ class MesStore {
       }
     }
 
+    // O que veio do servidor nao e alteracao deste aparelho: nao deve voltar como escrita.
+    // Importante: so vale para quem JA existe no servidor. Maquina ou usuario que so
+    // existe neste aparelho precisa continuar na fila de envio, senao nunca e criado la.
+    for (const mac of this.machines) {
+      if (machinesList.some((rm: any) => rm?.id === mac.id)) {
+        this.machineShadow.set(mac.id, JSON.stringify(mac));
+      }
+    }
+    for (const usr of this.users) {
+      if (usersList.some((ru: any) => ru?.id === usr.id)) {
+        this.userShadow.set(usr.id, JSON.stringify(usr));
+      }
+    }
+
     return changed;
   }
 
@@ -775,6 +853,148 @@ class MesStore {
   private serializeOrderForShadow(order: ProductionOrder): string {
     const { updatedAt: _ignored, ...rest } = order as any;
     return JSON.stringify(rest);
+  }
+
+  /**
+   * Libera a maquina que ficou apontando para uma etapa ja FINALIZADA (ou que nem
+   * existe mais na OP). Sem isso, o posto continuava mostrando a OP concluida como
+   * "em producao nesta maquina" e o operador recebia de volta um trabalho que ja
+   * deveria ter seguido para a proxima maquina do roteiro.
+   * Só age quando a OP existe neste aparelho - se a OP ainda nao sincronizou,
+   * nao ha informacao suficiente para liberar a maquina de outro posto.
+   */
+  private releaseMachinesWithFinishedSteps(): boolean {
+    let changed = false;
+
+    for (const machine of this.machines) {
+      if (!machine.currentOpId && !machine.currentOperationId) continue;
+
+      const order = this.orders.find((o) => o.id === machine.currentOpId);
+      if (!order) continue;
+
+      const step = order.steps.find((s) => s.id === machine.currentOperationId);
+      if (step && step.status !== 'FINALIZADA') continue;
+
+      machine.currentOpId = undefined;
+      machine.currentOperationId = undefined;
+      machine.currentPauseReason = undefined;
+      machine.pauseStartedAt = undefined;
+      if (machine.status === 'PRODUZINDO' || machine.status === 'PAUSADA') {
+        machine.status = 'DISPONIVEL';
+      }
+      changed = true;
+    }
+
+    return changed;
+  }
+
+  /**
+   * Envia para o Firestore os registros de historico que ainda nao subiram:
+   * auditoria, paradas de maquina e alertas. Antes isso ficava so no aparelho -
+   * com varios postos, cada celular guardava um pedaco do historico e o que
+   * acontecia em um nao aparecia para os outros nem para a gestao.
+   */
+  private syncHistoryToBackend(): void {
+    if (typeof fetch === 'undefined' || this.historyPushInFlight) return
+
+    const pendentes: Array<{ url: string; body: any }> = []
+    for (const log of this.auditLogs) {
+      if (log?.id && !this.syncedHistoryIds.has(log.id)) pendentes.push({ url: '/api/db/auditoria', body: log })
+    }
+    for (const pause of this.pauseLogs) {
+      if (pause?.id && !this.syncedHistoryIds.has(pause.id)) pendentes.push({ url: '/api/db/paradas', body: pause })
+    }
+    for (const alert of this.alerts) {
+      if (alert?.id && !this.syncedHistoryIds.has(alert.id)) pendentes.push({ url: '/api/db/alertas', body: alert })
+    }
+
+    if (pendentes.length === 0) return
+
+    // Lotes pequenos: o resto sobe nos ciclos seguintes, sem rajada de escrita.
+    const lote = pendentes.slice(0, 40)
+    this.historyPushInFlight = true
+
+    Promise.allSettled(
+      lote.map(async (item) => {
+        const response = await fetch(item.url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(item.body),
+        })
+        if (!response.ok) throw new Error('HTTP ' + response.status)
+        this.syncedHistoryIds.add(item.body.id)
+      })
+    ).finally(() => {
+      this.historyPushInFlight = false
+    })
+  }
+
+  /** Baixa o historico gravado pelos outros aparelhos e junta ao deste posto. */
+  private syncHistoryFromBackend(): void {
+    if (typeof fetch === 'undefined' || this.historyPullInFlight) return
+
+    this.historyPullInFlight = true
+    Promise.all([
+      fetch('/api/db/auditoria?limit=300', { cache: 'no-store' }),
+      fetch('/api/db/paradas', { cache: 'no-store' }),
+      fetch('/api/db/alertas', { cache: 'no-store' }),
+    ])
+      .then(async ([auditResponse, pauseResponse, alertResponse]) => {
+        if (!auditResponse.ok || !pauseResponse.ok || !alertResponse.ok) {
+          throw new Error('Falha ao ler o historico compartilhado.')
+        }
+
+        const [auditJson, pauseJson, alertJson] = await Promise.all([
+          auditResponse.json(),
+          pauseResponse.json(),
+          alertResponse.json(),
+        ])
+
+        let changed = false
+        changed = this.mergeHistoryList(this.auditLogs, auditJson?.data, 500) || changed
+        changed = this.mergeHistoryList(this.pauseLogs, pauseJson?.data, 500) || changed
+        changed = this.mergeHistoryList(this.alerts, alertJson?.data, 200) || changed
+
+        if (changed) {
+          this.applyingRemoteSharedData = true
+          try {
+            this.saveToStorage()
+          } finally {
+            this.applyingRemoteSharedData = false
+          }
+        }
+      })
+      .catch(() => {
+        // offline ou erro transitorio: tenta de novo no proximo ciclo
+      })
+      .finally(() => {
+        this.historyPullInFlight = false
+      })
+  }
+
+  /** Junta registros do servidor sem duplicar, mantendo os mais recentes no topo. */
+  private mergeHistoryList(local: any[], remotos: any, limite: number): boolean {
+    if (!Array.isArray(remotos) || remotos.length === 0) return false
+
+    const existentes = new Set(local.map((item) => item?.id).filter(Boolean))
+    let changed = false
+
+    for (const item of remotos) {
+      if (!item?.id) continue
+      this.syncedHistoryIds.add(item.id)
+      if (existentes.has(item.id)) continue
+      local.push(item)
+      existentes.add(item.id)
+      changed = true
+    }
+
+    if (!changed) return false
+
+    local.sort((a, b) =>
+      String(b?.timestamp || b?.startedAt || '').localeCompare(String(a?.timestamp || a?.startedAt || ''))
+    )
+    if (local.length > limite) local.splice(limite)
+    return true
   }
 
   /** Reconstrói a sombra sem carimbar nada (usado ao carregar e ao aplicar dados remotos). */
@@ -792,6 +1012,7 @@ class MesStore {
       const serialized = this.serializeOrderForShadow(order);
       const previous = this.orderShadow.get(order.id);
       if (previous !== undefined && previous === serialized) continue;
+      this.pendingOrderPushIds.add(order.id);
 
       if (previous !== undefined || !order.updatedAt) {
         order.updatedAt = now;
@@ -808,6 +1029,7 @@ class MesStore {
   public clearOrdersSyncError(): void {
     if (this.lastOrdersSyncError !== null) {
       this.lastOrdersSyncError = null;
+      this.lastOrdersConflict = null;
       this.notify();
     }
   }
@@ -1076,7 +1298,11 @@ class MesStore {
       (order.dimensions?.width === 120 && order.dimensions?.height === 80) ||
       (order.dimensions?.width === 12 && order.dimensions?.height === 8);
 
-    const hasCord = Boolean(
+    // Só o cordão AUTOMÁTICO exige a Máquina 3 (aplicador na própria máquina).
+    // Cordão manual virou etapa própria e libera M2, M3 e M4 normalmente.
+    const hasCord = order.cordMode
+      ? order.cordMode === 'AUTOMATICO'
+      : Boolean(
       order.hasDrawstring ||
       step.hasCord ||
       modelLower.includes('mochil') ||
@@ -2291,12 +2517,18 @@ class MesStore {
     const a = this.alerts.find((item) => item.id === alertId);
     if (a) {
       a.isRead = true;
+      // Forca o reenvio deste alerta: o servidor grava por id, entao o "lido"
+      // passa a valer para todos os aparelhos.
+      this.syncedHistoryIds.delete(a.id);
       this.saveToStorage();
     }
   }
 
   public markAllAlertsRead() {
-    this.alerts.forEach((a) => (a.isRead = true));
+    this.alerts.forEach((a) => {
+      a.isRead = true;
+      this.syncedHistoryIds.delete(a.id);
+    });
     this.saveToStorage();
   }
 
@@ -2316,6 +2548,8 @@ class MesStore {
     identifiedProductId: string;
     productName: string;
     productCode: string;
+    /** Decisoes de roteiro: produto, caminho de impressao, cordao e pendencias do PCP. */
+    blueprint: RouteBlueprint;
   } {
     // 1. Identify product from catalog or closest match
     let product = this.products.find(
@@ -2340,69 +2574,32 @@ class MesStore {
       }
     }
 
-    // 2. Build exact sequential production route based on technical OP parameters
-    const sequenceProcessIds: string[] = [];
+    // 2. Roteiro oficial montado pelas regras de produto (fonte unica em initialData)
+    //    REFILE XOR FLEXOGRAFIA; Carrossel imprime depois do Corte e Solda.
+    const routeBlueprint = buildRouteBlueprint({
+      productName: opData.produtoNome,
+      productCode: opData.codigoProduto,
+      model: opData.modelo,
+      client: opData.cliente,
+      printingMethod: opData.tipoImpressao,
+      handleType: opData.tipoAlca,
+      hasCord: opData.usoCordao,
+      cordMode: opData.tipoCordao,
+      hasWindow: opData.usoVisor,
+      productKeyOverride: opData.produtoConfirmadoPcp || opData.produtoSugeridoIa,
+    });
 
-    // 1. REFILE (Refiladeira - Welton)
-    sequenceProcessIds.push('proc_refile');
+    const sequenceProcessIds: string[] = [...routeBlueprint.processIds];
 
-    // 2. IMPRESSÃO (Flexografia ou Carrossel / Serigrafia)
-    const tipoImp = (opData.tipoImpressao || '').toUpperCase();
-    if (tipoImp === 'FLEXOGRAFIA') {
-      sequenceProcessIds.push('proc_flexografia');
-    } else if (
-      tipoImp === 'SERIGRAFIA' ||
-      tipoImp === 'ESTAMPARIA' ||
-      opData.personalizacao?.toLowerCase().includes('serigrafia') ||
-      opData.personalizacao?.toLowerCase().includes('carrossel') ||
-      opData.personalizacao?.toLowerCase().includes('estamparia')
-    ) {
-      sequenceProcessIds.push('proc_serigrafia');
+    // Cordao AUTOMATICO e aplicado pela propria maquina de corte e solda (Maquina 3).
+    // Cordao MANUAL virou etapa propria e por isso nao prende mais a OP na Maquina 3.
+    const hasCord = routeBlueprint.cordMode === 'AUTOMATICO';
+
+    // A regra de produto vence a busca por nome no catalogo.
+    if (routeBlueprint.productCatalogId) {
+      const ruleProduct = this.products.find((p) => p.id === routeBlueprint.productCatalogId);
+      if (ruleProduct) product = ruleProduct;
     }
-    // Se SEM_IMPRESSAO, nenhuma etapa de impressão é inserida!
-
-    // 3. CORTE E SOLDA (Máquinas 1 a 4)
-    sequenceProcessIds.push('proc_solda');
-
-    // Cordão/Cordinha não é etapa separada: é executado na mesma máquina de Corte e Solda
-    const hasCord = Boolean(
-      opData.usoCordao ||
-      opData.tipoAlca === 'CORDAO' ||
-      opData.modelo.toLowerCase().includes('mochil') ||
-      opData.modelo.toLowerCase().includes('cordao') ||
-      opData.acabamentos?.some((a) => a.toLowerCase().includes('cordão') || a.toLowerCase().includes('fio')) ||
-      product?.requiresDrawstring
-    );
-
-    if (
-      opData.acabamentos?.some(
-        (a) => a.toLowerCase().includes('segundo carrossel') || a.toLowerCase().includes('carrossel pós')
-      )
-    ) {
-      if (!sequenceProcessIds.includes('proc_serigrafia')) {
-        sequenceProcessIds.push('proc_serigrafia');
-      }
-    }
-
-    // 4. ALÇA / ACABAMENTO (Colocar Alça se não for alça vazada ou sem alça)
-    const isAlcaVazada =
-      opData.tipoAlca === 'VAZADA' ||
-      opData.modelo.toLowerCase().includes('vazada') ||
-      opData.modelo.toLowerCase().includes('palhaço');
-    const isMochilinha =
-      opData.tipoAlca === 'CORDAO' ||
-      opData.modelo.toLowerCase().includes('mochil');
-
-    if (
-      (opData.tipoAlca === 'FITA' ||
-        (opData.tipoAlca && opData.tipoAlca !== 'NENHUMA' && !isAlcaVazada && !isMochilinha && !hasCord)) &&
-      !product?.family.includes('Vazada')
-    ) {
-      sequenceProcessIds.push('proc_colocar_alca');
-    }
-
-    // 5. EXPEDIÇÃO (Etapa final de conferência e envio manual)
-    sequenceProcessIds.push('proc_expedicao');
 
     // 3. Auto-allocate best compatible machine for each process step
     const steps = sequenceProcessIds.map((procId) => {
@@ -2535,6 +2732,7 @@ class MesStore {
 
     return {
       steps,
+      blueprint: routeBlueprint,
       identifiedProductId: product ? product.id : 'prod_sacola_alca_fita',
       productName: product ? product.name : opData.produtoNome || 'Produto Personalizado Bella Top',
       productCode: product ? product.code : opData.codigoProduto || 'BT-GEN-01',
@@ -2598,7 +2796,11 @@ class MesStore {
     const stepsMissingMachine = route.steps.filter(
       (s) => s.processTypeId !== 'proc_expedicao' && (!s.machineId || (s as any).needsMachineAllocation)
     );
-    const requiresPcpReview = Boolean(opData.precisaRevisaoPcp) || stepsMissingMachine.length > 0;
+    // As regras de roteiro tambem podem exigir o PCP: produto, impressao ou cordao ambiguos.
+    const requiresPcpReview =
+      Boolean(opData.precisaRevisaoPcp) ||
+      stepsMissingMachine.length > 0 ||
+      route.blueprint.needsPcpValidation;
 
     // Build operation steps with initial physical quantities
     const steps: OperationStep[] = route.steps.map((s, idx) => {
@@ -2671,9 +2873,20 @@ class MesStore {
         back: opData.impressaoVerso,
       },
       handleType: opData.tipoAlca,
-      hasDrawstring: opData.usoCordao,
+      hasDrawstring: opData.usoCordao || route.blueprint.cordMode === 'MANUAL' || route.blueprint.cordMode === 'AUTOMATICO',
+      cordMode: route.blueprint.cordMode,
+      productKey: route.blueprint.productKey,
       hasVisor: opData.usoVisor,
-      technicalNotes: opData.observacoesTecnicas,
+      // O tipo de cordao fica visivel na ficha da OP, inclusive quando foi definido
+      // automaticamente pela regra de cliente (Arezzo, Anacapri, Sonho dos Pes).
+      technicalNotes: [
+        route.blueprint.cordMode === 'MANUAL' ? 'Cordão: Manual' : '',
+        route.blueprint.cordMode === 'AUTOMATICO' ? 'Cordão: Automático (na máquina)' : '',
+        route.blueprint.cordForcedByClient ? 'Regra fixa do cliente ' + (opData.cliente || '') : '',
+        opData.observacoesTecnicas || '',
+      ]
+        .filter(Boolean)
+        .join(' · '),
       deadline: deadlineDate,
       estimatedCompletionDate: new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString(),
       safetyMarginHours: 36,

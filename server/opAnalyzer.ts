@@ -28,6 +28,14 @@ export interface StructuredOpOutput {
     handle_type: 'VAZADA' | 'FITA' | 'CORDAO' | 'NENHUMA' | 'NAO_IDENTIFICADO';
     has_window: boolean;
     has_cord: boolean;
+  /** Cordao aplicado pela maquina (AUTOMATICO) ou em posto manual (MANUAL). */
+  cord_mode: 'AUTOMATICO' | 'MANUAL' | 'NENHUM' | 'NAO_IDENTIFICADO';
+  /** Tipo de produto identificado na OP, para escolha do roteiro. */
+  product_type: string;
+  /** true quando a OP exige costura (Sacola Box). */
+  requires_sewing: boolean;
+  /** true quando a fabricacao inicial e terceirizada (Saquinho de Algodao). */
+  outsourced: boolean;
     printing_method: 'FLEXOGRAFIA' | 'SERIGRAFIA' | 'ESTAMPARIA' | 'SEM_IMPRESSAO' | 'NAO_IDENTIFICADO';
     printing_colors: number;
     print_front: string;
@@ -62,6 +70,8 @@ export interface StructuredOpOutput {
     handle_type: ExtractedField<string>;
     has_window: ExtractedField<boolean>;
     has_cord: ExtractedField<boolean>;
+  cord_mode: ExtractedField<string>;
+  product_type: ExtractedField<string>;
     printing_method: ExtractedField<string>;
     printing_colors: ExtractedField<number>;
     deadline: ExtractedField<string>;
@@ -166,6 +176,10 @@ Retorne ESTRITAMENTE em formato JSON com o seguinte schema:
     "height": 450,
     "bottom": 0,
     "size": "P" | "M" | "G" | "GG" | "8x12" | "Personalizado",
+    "product_type": "SACOLA_ALCA_FITA" | "SACOLA_ALCA_VAZADA" | "SACO_TNT" | "MOCHILINHA" | "SACOLA_PRESENTE" | "SACO_PRESENTE" | "SACOLA_BOX" | "ECOBAG_ALGODAO" | "LIXO_CAR" | "SAQUINHO_ALGODAO" | "NAO_IDENTIFICADO",
+    "cord_mode": "AUTOMATICO" | "MANUAL" | "NENHUM" | "NAO_IDENTIFICADO",
+    "requires_sewing": false,
+    "outsourced": false,
     "quantity": 10000,
     "handle_type": "VAZADA" | "FITA" | "CORDAO" | "NENHUMA",
     "has_window": false,
@@ -197,6 +211,8 @@ Retorne ESTRITAMENTE em formato JSON com o seguinte schema:
     "height": { "value": 450, "confidence": 0.95 },
     "bottom": { "value": 0, "confidence": 0.90 },
     "size": { "value": "G", "confidence": 0.90 },
+    "product_type": { "value": "SACOLA_ALCA_FITA", "confidence": 0.90 },
+    "cord_mode": { "value": "NENHUM", "confidence": 0.90 },
     "quantity": { "value": 10000, "confidence": 0.98 },
     "handle_type": { "value": "VAZADA", "confidence": 0.95 },
     "has_window": { "value": false, "confidence": 0.98 },
@@ -364,6 +380,10 @@ Retorne ESTRITAMENTE em formato JSON com o seguinte schema:
         handle_type: handleType,
         has_window: hasWindow,
         has_cord: hasCord,
+        cord_mode: (String((op as any).cord_mode || '').toUpperCase() || 'NAO_IDENTIFICADO') as any,
+        product_type: String((op as any).product_type || 'NAO_IDENTIFICADO').toUpperCase(),
+        requires_sewing: Boolean((op as any).requires_sewing),
+        outsourced: Boolean((op as any).outsourced),
         printing_method: printingMethod,
         printing_colors: printingColors,
         print_front: op.print_front || 'Conforme Layout Aprovado',
@@ -547,6 +567,10 @@ Retorne ESTRITAMENTE em formato JSON com o seguinte schema:
         handle_type: handleType,
         has_window: hasVisor,
         has_cord: hasCordao,
+        cord_mode: 'NAO_IDENTIFICADO' as any,
+        product_type: 'NAO_IDENTIFICADO',
+        requires_sewing: false,
+        outsourced: false,
         printing_method: printMethod,
         printing_colors: printingColors,
         print_front: 'Conforme Layout',

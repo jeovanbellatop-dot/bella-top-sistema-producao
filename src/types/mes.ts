@@ -62,6 +62,9 @@ export type OpStatus =
   | 'FINALIZADA'
   | 'ATRASADA';
 
+/** Como o cordao e aplicado: pela propria maquina de corte e solda ou em posto manual. */
+export type CordMode = 'AUTOMATICO' | 'MANUAL' | 'NENHUM' | 'NAO_IDENTIFICADO';
+
 export type ProductionUnit = 'UNIDADES' | 'METROS' | 'PECAS' | 'QUILOS';
 
 export type SystemSectorCode =
@@ -72,6 +75,9 @@ export type SystemSectorCode =
   | 'ESTAMPARIA'
   | 'CORTE_SOLDA'
   | 'ALCA'
+  | 'CORDAO_MANUAL'
+  | 'COSTURA'
+  | 'TERCEIRIZADO'
   | 'EXPEDICAO';
 
 export interface SectorDefinition {
@@ -259,6 +265,16 @@ export interface ExtractedOpData {
   personalizacao: string;
   tipoAlca: 'FITA' | 'VAZADA' | 'CORDAO' | 'NENHUMA' | 'NAO_IDENTIFICADO';
   usoCordao: boolean;
+  /** Cordao automatico (na maquina) ou manual (posto proprio). Ambiguo vai para o PCP. */
+  tipoCordao?: CordMode;
+  /** Produto confirmado pelo PCP na revisao; vence a identificacao automatica. */
+  produtoConfirmadoPcp?: string;
+  /** Produto sugerido pela IA na leitura do PDF. O PCP pode trocar antes de liberar. */
+  produtoSugeridoIa?: string;
+  /** Marcado quando a OP exige costura (Sacola Box). */
+  necessitaCostura?: boolean;
+  /** Marcado quando a fabricacao inicial e terceirizada (Saquinho de Algodao). */
+  necessitaTerceirizacao?: boolean;
   usoVisor: boolean;
   acabamentos: string[];
   observacoesTecnicas: string;
@@ -389,6 +405,10 @@ export interface ProductionOrder {
   
   handleType: string;
   hasDrawstring: boolean;
+  /** Como o cordao sera aplicado nesta OP. Aparece na ficha da OP. */
+  cordMode?: CordMode;
+  /** Tipo de produto resolvido pelas regras de roteiro (SACOLA_BOX, ECOBAG_ALGODAO, ...). */
+  productKey?: string;
   hasVisor: boolean;
   technicalNotes: string;
   

@@ -109,11 +109,20 @@ export const OperatorCockpit: React.FC<OperatorCockpitProps> = ({
   const [selectedLayoutOp, setSelectedLayoutOp] = useState<ProductionOrder | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [operationSuccess, setOperationSuccess] = useState<string | null>(null);
+  // Detalhes secundarios ficam recolhidos no celular (tela limpa para o operador).
+  const [showDetails, setShowDetails] = useState(false);
 
   const machineQueue = activeMachine ? getMachineQueue(activeMachine.id) : [];
   const selectedQueueItem = machineQueue.find((item) => item.step.id === selectedQueueStepId);
   const currentOp = orders.find((order) => order.id === activeMachine?.currentOpId);
-  const currentStep = currentOp?.steps.find((step) => step.id === activeMachine?.currentOperationId);
+  // A etapa so conta como "em producao nesta maquina" enquanto nao estiver finalizada.
+  // Sem esta checagem, um cadastro de maquina desatualizado (currentOpId antigo) fazia a
+  // OP finalizada VOLTAR para o operador, em vez de seguir para a proxima maquina do roteiro.
+  const currentStepCandidate = currentOp?.steps.find((step) => step.id === activeMachine?.currentOperationId);
+  const currentStep =
+    currentStepCandidate && currentStepCandidate.status !== 'FINALIZADA'
+      ? currentStepCandidate
+      : undefined;
   const isProducing = activeMachine?.status === 'PRODUZINDO';
   const isPaused = activeMachine?.status === 'PAUSADA';
 
@@ -230,7 +239,7 @@ export const OperatorCockpit: React.FC<OperatorCockpitProps> = ({
   };
 
   return (
-    <div className="max-w-5xl mx-auto pb-16 space-y-5">
+    <div className="max-w-5xl mx-auto pb-16 space-y-4 sm:space-y-5 px-3 sm:px-0">
       {/* TELA DE IDENTIFICAÇÃO - Exibida apenas para operadores comuns quando a máquina não tiver sessão ativa */}
       {!isAdminSession && !machineSession ? (
         <MachineStationLogin
@@ -258,14 +267,14 @@ export const OperatorCockpit: React.FC<OperatorCockpitProps> = ({
                   MÁQUINAS DO PARQUE FABRIL:
                 </span>
               </div>
-              <div className="flex flex-wrap items-center gap-1.5">
+              <div className="flex items-center gap-1.5 overflow-x-auto sm:flex-wrap -mx-1 px-1 pb-1">
                 {factoryMachines.map((m) => {
                   const isSelected = m.id === activeMachine.id;
                   return (
                     <button
                       key={m.id}
                       onClick={() => setSelectedMachineId(m.id)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                      className={`shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
                         isSelected
                           ? 'bg-amber-600 text-white shadow-sm'
                           : 'bg-white text-[#6E615B] hover:text-[#1C1418] hover:bg-amber-100/50 border border-amber-200'
@@ -281,7 +290,7 @@ export const OperatorCockpit: React.FC<OperatorCockpitProps> = ({
           )}
 
           {/* Header com Operador Identificado ou Identificação Administrativa */}
-          <header className="rounded-2xl border border-[#E5DAD3] bg-white p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+          <header className="rounded-2xl border border-[#E5DAD3] bg-white p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 shadow-xs">
             <div>
               <div className="flex items-center gap-2">
                 {isAdminSession ? (
@@ -307,7 +316,13 @@ export const OperatorCockpit: React.FC<OperatorCockpitProps> = ({
               <h1 className="text-2xl sm:text-3xl font-black mt-1 tracking-tight text-[#1C1418]">
                 {activeMachine.name.toUpperCase()}
               </h1>
-              <p className="text-xs sm:text-sm text-[#6E615B] mt-1">
+
+                    {/* Linha curta de identificacao para o celular */}
+                    <p className="sm:hidden text-xs text-[#6E615B] mt-1">
+                      <span className="font-mono font-bold text-[#1C1418]">{activeMachine.code}</span>
+                      {machineSession?.operatorName ? " - " + machineSession.operatorName : ""}
+                    </p>
+              <p className="hidden sm:block text-sm text-[#6E615B] mt-1">
                 <span className="font-mono font-bold text-[#1C1418]">{activeMachine.code}</span> · {activeMachine.sector} ·{' '}
                 {isAdminSession ? (
                   <>
@@ -421,7 +436,9 @@ export const OperatorCockpit: React.FC<OperatorCockpitProps> = ({
                 (activeTab === 'production' ? 'bg-[#E30A78] text-white shadow-sm' : 'text-[#6E615B] hover:text-[#1C1418]')
               }
             >
-              <Play className="w-4 h-4" /> Produção em Andamento
+              <Play className="w-4 h-4" />
+              <span className="hidden sm:inline">Produção em Andamento</span>
+              <span className="sm:hidden">Produção</span>
             </button>
             <button
               onClick={() => setActiveTab('queue')}
@@ -431,7 +448,10 @@ export const OperatorCockpit: React.FC<OperatorCockpitProps> = ({
               }
             >
               <ListOrdered className="w-4 h-4" />{' '}
-              {isCorteSoldaSector ? 'Fila Compartilhada (Corte e Solda)' : 'Fila de OPs'}
+              <span className="hidden sm:inline">
+                {isCorteSoldaSector ? 'Fila Compartilhada (Corte e Solda)' : 'Fila de OPs'}
+              </span>
+              <span className="sm:hidden">Fila</span>
               {machineQueue.length > 0 && (
                 <span
                   className={
@@ -448,15 +468,15 @@ export const OperatorCockpit: React.FC<OperatorCockpitProps> = ({
           {/* ABA DE PRODUÇÃO (Cronômetro, Perdas, Saldo, Roteiro, etc. - 100% PRESERVADOS) */}
           {activeTab === 'production' &&
             (currentOp && currentStep ? (
-              <section className="rounded-3xl border border-[#E5DAD3] bg-white p-6 sm:p-8 space-y-6 shadow-xs">
+              <section className="rounded-3xl border border-[#E5DAD3] bg-white p-4 sm:p-8 space-y-4 sm:space-y-6 shadow-xs">
                 {/* Header with Bag Photo and OP Details */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-gradient-to-r from-pink-50/60 to-white border border-[#F5C6DC]">
-                  <div className="flex items-center gap-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
                     <OpProductThumbnail
                       thumbnail={currentOp.productThumbnail}
                       layoutImage={currentOp.layoutPreviewImage || currentOp.layoutImage}
                       opNumber={currentOp.opNumber}
-                      size="xl"
+                      size="hero"
                       onClick={() => onSelectOp(currentOp.id)}
                       className="shadow-md border-2 border-[#E30A78]/30 cursor-pointer"
                     />
@@ -482,21 +502,21 @@ export const OperatorCockpit: React.FC<OperatorCockpitProps> = ({
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => setSelectedLayoutOp(currentOp)}
-                      className="px-3.5 py-2 rounded-xl bg-white border border-[#E5DAD3] hover:border-[#B30A5C] text-xs font-bold text-[#1C1418] hover:text-[#B30A5C] flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                      className="flex-1 min-h-11 px-3.5 py-2 rounded-xl bg-white border border-[#E5DAD3] hover:border-[#B30A5C] text-xs font-bold text-[#1C1418] hover:text-[#B30A5C] flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer"
                     >
                       <Eye className="w-4 h-4 text-[#B30A5C]" />
                       <span>Ver Layout Completo</span>
                     </button>
                     <button
                       onClick={() => onSelectOp(currentOp.id)}
-                      className="px-3 py-2 rounded-xl border border-[#E5DAD3] bg-white text-xs font-bold text-[#1C1418] hover:bg-[#FAF5F1] transition cursor-pointer"
+                      className="flex-1 min-h-11 px-3 py-2 rounded-xl border border-[#E5DAD3] bg-white text-xs font-bold text-[#1C1418] hover:bg-[#FAF5F1] transition cursor-pointer"
                     >
                       Detalhes da OP
                     </button>
                   </div>
                 </div>
 
-                <div className="grid sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div className="rounded-2xl bg-[#FAF5F1] p-4">
                     <p className="text-xs text-[#8A7D77]">ETAPA</p>
                     <p className="font-bold mt-1 text-[#1C1418]">{currentStep.processName}</p>
@@ -513,7 +533,7 @@ export const OperatorCockpit: React.FC<OperatorCockpitProps> = ({
                       {currentStep.receivedQuantity.toLocaleString('pt-BR')} {currentStep.unit}
                     </p>
                   </div>
-                  <div className="rounded-2xl bg-[#FAF5F1] p-4">
+                  <div className={"rounded-2xl bg-[#FAF5F1] p-4 sm:block " + (showDetails ? "" : "hidden")}>
                     <p className="text-xs text-[#8A7D77] flex items-center gap-1">
                       <Clock className="w-3 h-3" /> TEMPO DECORRIDO
                     </p>
@@ -522,12 +542,21 @@ export const OperatorCockpit: React.FC<OperatorCockpitProps> = ({
                     </p>
                     <p className="text-[10px] text-[#9A8B84] mt-1">Contagem crescente</p>
                   </div>
-                  <div className="rounded-2xl bg-[#FAF5F1] p-4">
+                  <div className={"rounded-2xl bg-[#FAF5F1] p-4 sm:block " + (showDetails ? "" : "hidden")}>
                     <p className="text-xs text-[#8A7D77]">ESTIMATIVA TOTAL</p>
                     <p className="font-mono font-bold text-cyan-700 mt-1">{formatTime(estimatedSeconds)}</p>
                     <p className="text-[10px] text-[#9A8B84] mt-1">{productionProgress}% estimado</p>
                   </div>
                 </div>
+
+                {/* No celular, os dados secundarios ficam recolhidos ate o operador pedir */}
+                <button
+                  type="button"
+                  onClick={() => setShowDetails((prev) => !prev)}
+                  className="sm:hidden w-full min-h-11 rounded-2xl border border-[#E5DAD3] bg-white text-xs font-bold text-[#6E615B] flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {showDetails ? "Ocultar detalhes" : "Ver detalhes"}
+                </button>
 
                 {isPaused && (
                   <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-700 flex gap-2">
@@ -555,9 +584,9 @@ export const OperatorCockpit: React.FC<OperatorCockpitProps> = ({
                   )}
                   <button
                     onClick={() => setIsFinishModalOpen(true)}
-                    className="min-h-16 rounded-2xl bg-[#F2EBE6] hover:bg-[#E8DED8] text-[#1C1418] font-black flex items-center justify-center gap-2 cursor-pointer border border-[#E5DAD3] transition-colors"
+                    className="min-h-16 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-base flex items-center justify-center gap-2 cursor-pointer border border-emerald-700/20 shadow-sm transition-colors"
                   >
-                    <CheckCircle className="w-6 h-6 text-emerald-600" /> FINALIZAR ETAPA
+                    <CheckCircle className="w-6 h-6 text-white" /> FINALIZAR ETAPA
                   </button>
                 </div>
               </section>
@@ -604,21 +633,21 @@ export const OperatorCockpit: React.FC<OperatorCockpitProps> = ({
                 onStartOp={(stepId) => startSelectedOp(stepId)}
               />
             ) : (
-              <section className="rounded-3xl border border-[#E5DAD3] bg-white p-5 sm:p-6 shadow-xs">
+              <section className="rounded-3xl border border-[#E5DAD3] bg-white p-4 sm:p-6 shadow-xs">
                 <div>
                   <h2 className="text-xl font-black text-[#1C1418]">Fila de OPs • {activeMachine.name}</h2>
                   <p className="text-sm text-[#6E615B] mt-1">Selecione uma OP para iniciar nesta máquina.</p>
                 </div>
                 {selectedQueueItem ? (
-                  <div className="mt-5 rounded-3xl border border-pink-300 bg-pink-50/50 p-6 sm:p-8">
+                  <div className="mt-5 rounded-3xl border border-pink-300 bg-pink-50/50 p-4 sm:p-8">
                     <p className="text-xs font-black tracking-widest text-[#B30A5C]">OP SELECIONADA PARA INICIAR</p>
                     <div className="mt-4 flex flex-col sm:flex-row items-start justify-between gap-4">
-                      <div className="flex items-center gap-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
                         <OpProductThumbnail
                           thumbnail={selectedQueueItem.order.productThumbnail}
                           layoutImage={selectedQueueItem.order.layoutPreviewImage || selectedQueueItem.order.layoutImage}
                           opNumber={selectedQueueItem.order.opNumber}
-                          size="lg"
+                          size="hero"
                           onClick={() => setSelectedLayoutOp(selectedQueueItem.order)}
                         />
                         <div>
@@ -702,7 +731,7 @@ export const OperatorCockpit: React.FC<OperatorCockpitProps> = ({
                           </div>
                           <button
                             onClick={() => setSelectedQueueStepId(item.step.id)}
-                            className="rounded-xl bg-emerald-600 hover:bg-emerald-500 px-5 py-3 text-sm font-black text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                            className="w-full sm:w-auto min-h-12 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-5 py-3 text-sm font-black text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer shadow-sm"
                           >
                             SELECIONAR <ChevronRight className="w-4 h-4" />
                           </button>

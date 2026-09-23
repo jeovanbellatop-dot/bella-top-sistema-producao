@@ -191,7 +191,13 @@ export const FactoryOverview: React.FC<FactoryOverviewProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {machines.map((machine) => {
             const currentOp = orders.find((o) => o.id === machine.currentOpId);
-            const currentStep = currentOp?.steps.find((s) => s.id === machine.currentOperationId);
+            // Etapa ja finalizada nao e mais "producao em andamento" nesta maquina:
+            // o painel deve mostrar a maquina livre e a OP seguindo para a proxima etapa.
+            const currentStepCandidate = currentOp?.steps.find((s) => s.id === machine.currentOperationId);
+            const currentStep =
+              currentStepCandidate && currentStepCandidate.status !== 'FINALIZADA'
+                ? currentStepCandidate
+                : undefined;
             const progress =
               currentStep && currentStep.receivedQuantity > 0
                 ? Math.min(100, Math.round((currentStep.producedQuantity / currentStep.receivedQuantity) * 100))

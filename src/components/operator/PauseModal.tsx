@@ -98,10 +98,10 @@ export const PauseModal: React.FC<PauseModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#FAF5F1] backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-      <div className="bg-white border border-[#E5DAD3] w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-[#FAF5F1] backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
+      <div className="bg-white border border-[#E5DAD3] w-full max-w-lg rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92dvh]">
         {/* Header */}
-        <div className="bg-[#FAF5F1] px-6 py-4 border-b border-[#E5DAD3] flex items-center justify-between">
+        <div className="bg-[#FAF5F1] px-4 sm:px-6 py-4 border-b border-[#E5DAD3] flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
               <PauseCircle className="w-6 h-6" />
@@ -125,7 +125,7 @@ export const PauseModal: React.FC<PauseModalProps> = ({
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4 text-xs">
+        <form onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-6 space-y-4 text-xs">
           {errorMsg && (
             <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 shrink-0 text-rose-500" />
@@ -158,7 +158,7 @@ export const PauseModal: React.FC<PauseModalProps> = ({
             ))}
           </div>
 
-          <div className="grid grid-cols-1 gap-2 max-h-52 overflow-y-auto pr-1">
+          <div className="grid grid-cols-1 gap-2 sm:max-h-52 sm:overflow-y-auto sm:pr-1">
             {[...currentGroupReasons, OTHER_REASON].map((reason) => (
               <label
                 key={reason}
@@ -197,17 +197,17 @@ export const PauseModal: React.FC<PauseModalProps> = ({
             </div>
           )}
 
-          <div className="pt-3 border-t border-[#E5DAD3] flex items-center justify-between">
+          <div className="sticky bottom-0 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 bg-white border-t border-[#E5DAD3] grid grid-cols-2 gap-3 items-center">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl bg-[#F2EBE6] hover:bg-[#E8DED8] text-[#3A3034] font-bold"
+              className="min-h-12 w-full px-4 rounded-xl bg-[#F2EBE6] hover:bg-[#E8DED8] text-[#3A3034] font-bold"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-white font-extrabold text-xs shadow-lg"
+              className="min-h-12 w-full px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-white font-extrabold text-xs shadow-lg"
             >
               CONFIRMAR PAUSA
             </button>

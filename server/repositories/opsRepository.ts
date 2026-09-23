@@ -70,14 +70,53 @@ export const opsRepository = {
     assertFitsFirestoreDocument(opWithoutSteps, `A Ordem de Produção ${order.opNumber || order.id}`);
 
     const opRef = firestore.collection('ops').doc(order.id);
-    await opRef.set(opWithoutSteps);
+    // GUARDA DE CONCORRENCIA MULTIDISPOSITIVO:
+    // varios aparelhos gravam a mesma OP ao mesmo tempo. Sem esta checagem o
+    // ultimo a enviar vence, inclusive quando ele carrega uma copia ANTIGA, e o
+    // apontamento recem-feito por outro dispositivo e apagado.
+    const incomingStamp = String((opWithoutSteps as any).updatedAt || '');
+    const isStaleWrite = await firestore.runTransaction(async (transaction) => {
+      const existing = await transaction.get(opRef);
+      if (existing.exists) {
+        const currentStamp = String((existing.data() as any)?.updatedAt || '');
+        if (currentStamp && incomingStamp && currentStamp > incomingStamp) {
+          return true;
+        }
+      }
+      transaction.set(opRef, opWithoutSteps);
+      return false;
+    });
+
+    if (isStaleWrite) {
+      const staleError: any = new Error(
+        `Versao desatualizada: a OP ${order.opNumber || order.id} ja foi alterada por outro dispositivo. Os dados mais recentes serao recarregados.`
+      );
+      staleError.code = 'STALE_WRITE';
+      throw staleError;
+    }
 
     if (steps.length > 0) {
+      const stepsRef = opRef.collection('etapas');
+
+      // INVARIANTE DE CHAO DE FABRICA: etapa FINALIZADA nunca volta atras.
+      // O aparelho envia a OP inteira; sem esta trava, um aparelho com copia
+      // antiga (ou um reenvio da etapa anterior) devolvia a etapa concluida para
+      // PRONTA e o trabalho ja feito voltava para o operador.
+      const existingSnapshot = await stepsRef.get();
+      const existingSteps = new Map<string, OperationStep>();
+      existingSnapshot.docs.forEach((d) => existingSteps.set(d.id, d.data() as OperationStep));
+
       const batch = firestore.batch();
       for (const step of steps) {
+        const current = existingSteps.get(step.id);
+        if (current && current.status === 'FINALIZADA' && step.status !== 'FINALIZADA') {
+          console.warn(
+            `[opsRepository] OP ${order.opNumber || order.id}: ignorada tentativa de reabrir a etapa ${step.processName || step.id} (ja FINALIZADA).`
+          );
+          continue;
+        }
         assertFitsFirestoreDocument(step, `A etapa ${step.processName || step.id} da OP ${order.opNumber || order.id}`);
-        const stepRef = opRef.collection('etapas').doc(step.id);
-        batch.set(stepRef, step);
+        batch.set(stepsRef.doc(step.id), step);
       }
       await batch.commit();
     }

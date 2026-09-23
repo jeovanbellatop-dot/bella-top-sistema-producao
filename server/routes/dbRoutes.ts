@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { getLiveCollection, getLiveSteps } from '../firebaseAdmin';
 import { opsRepository } from '../repositories/opsRepository';
 import { machinesRepository } from '../repositories/machinesRepository';
 import { usersRepository } from '../repositories/usersRepository';
@@ -16,7 +17,9 @@ export const dbRoutes = Router();
 // GET /api/db/ops - Lista todas as OPs
 dbRoutes.get('/ops', async (_req: Request, res: Response) => {
   try {
-    const list = await opsRepository.listOps();
+    // Espelho vivo em memoria: evita cobrar uma leitura no Firestore por aparelho.
+    const live = getLiveCollection('ops');
+    const list = live !== null ? live : await opsRepository.listOps();
     return res.json({ success: true, data: list });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
@@ -29,14 +32,23 @@ dbRoutes.post('/ops', async (req: Request, res: Response) => {
     const created = await opsRepository.createOp(req.body);
     return res.status(201).json({ success: true, data: created });
   } catch (err: any) {
-    return res.status(400).json({ success: false, error: err.message });
+    const isStale = err?.code === 'STALE_WRITE';
+    return res.status(isStale ? 409 : 400).json({ success: false, error: err.message, code: err?.code });
   }
 });
 
 // GET /api/db/ops/:opId - Busca OP por ID com suas etapas
 dbRoutes.get('/ops/:opId', async (req: Request, res: Response) => {
   try {
-    const op = await opsRepository.getOpById(req.params.opId);
+    const liveOps = getLiveCollection('ops');
+    const liveSteps = liveOps !== null ? getLiveSteps(req.params.opId) : null;
+    const op =
+      liveOps !== null && liveSteps !== null
+        ? (() => {
+            const found = liveOps.find((o: any) => o?.id === req.params.opId);
+            return found ? { ...found, steps: liveSteps } : null;
+          })()
+        : await opsRepository.getOpById(req.params.opId);
     if (!op) {
       return res.status(404).json({ success: false, error: 'Ordem de Produção não encontrada.' });
     }
@@ -63,7 +75,8 @@ dbRoutes.put('/ops/:opId', async (req: Request, res: Response) => {
 // GET /api/db/ops/:opId/etapas - Lista etapas da OP
 dbRoutes.get('/ops/:opId/etapas', async (req: Request, res: Response) => {
   try {
-    const steps = await opsRepository.listSteps(req.params.opId);
+    const liveStepsList = getLiveSteps(req.params.opId);
+    const steps = liveStepsList !== null ? liveStepsList : await opsRepository.listSteps(req.params.opId);
     return res.json({ success: true, data: steps });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
@@ -258,7 +271,8 @@ dbRoutes.get('/maquinas/:machineId/fila', async (req: Request, res: Response) =>
 // GET /api/db/maquinas - Lista máquinas
 dbRoutes.get('/maquinas', async (_req: Request, res: Response) => {
   try {
-    const list = await machinesRepository.listMachines();
+    const liveMachines = getLiveCollection('maquinas');
+    const list = liveMachines !== null ? liveMachines : await machinesRepository.listMachines();
     return res.json({ success: true, data: list });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
@@ -292,7 +306,8 @@ dbRoutes.put('/maquinas/:machineId', async (req: Request, res: Response) => {
 // GET /api/db/usuarios - Lista usuários
 dbRoutes.get('/usuarios', async (_req: Request, res: Response) => {
   try {
-    const list = await usersRepository.listUsers();
+    const liveUsers = getLiveCollection('usuarios');
+    const list = liveUsers !== null ? liveUsers : await usersRepository.listUsers();
     return res.json({ success: true, data: list });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });

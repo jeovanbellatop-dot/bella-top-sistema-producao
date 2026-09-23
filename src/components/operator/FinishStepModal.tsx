@@ -130,10 +130,10 @@ export const FinishStepModal: React.FC<FinishStepModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#FAF5F1]/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-      <div className="bg-white border border-[#E5DAD3] w-full max-w-xl rounded-2xl shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-[#FAF5F1]/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
+      <div className="bg-white border border-[#E5DAD3] w-full max-w-xl rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92dvh]">
         {/* Header */}
-        <div className="bg-[#FAF5F1] px-6 py-4 border-b border-[#E5DAD3] flex items-center justify-between">
+        <div className="bg-[#FAF5F1] px-4 sm:px-6 py-4 border-b border-[#E5DAD3] flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-600 flex items-center justify-center font-bold">
               <CheckCircle2 className="w-6 h-6" />
@@ -157,7 +157,7 @@ export const FinishStepModal: React.FC<FinishStepModalProps> = ({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-5 text-xs">
+        <form onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-6 space-y-4 sm:space-y-5 text-xs">
           {errorMsg && (
             <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 shrink-0 text-rose-500" />
@@ -181,6 +181,7 @@ export const FinishStepModal: React.FC<FinishStepModalProps> = ({
               </label>
               <input
                 type="number"
+                  inputMode="numeric"
                 min="1"
                 required
                 value={producedQuantity === 0 ? '' : producedQuantity}
@@ -199,6 +200,7 @@ export const FinishStepModal: React.FC<FinishStepModalProps> = ({
               </label>
               <input
                 type="number"
+                  inputMode="numeric"
                 min="0"
                 max={producedQuantity}
                 required
@@ -228,7 +230,7 @@ export const FinishStepModal: React.FC<FinishStepModalProps> = ({
               </div>
             </div>
 
-            <div className="text-[10px] text-[#6E615B] bg-white px-3 py-1.5 rounded-lg border border-[#E5DAD3] max-w-xs">
+            <div className="hidden sm:block text-[10px] text-[#6E615B] bg-white px-3 py-1.5 rounded-lg border border-[#E5DAD3] max-w-xs">
               🔒 <span className="text-[#3A3034] font-semibold">Regra de Chão de Fábrica:</span> As perdas não avançam para a próxima máquina.
             </div>
           </div>
@@ -303,17 +305,17 @@ export const FinishStepModal: React.FC<FinishStepModalProps> = ({
           </div>
 
           {/* Footer buttons */}
-          <div className="pt-3 border-t border-[#E5DAD3] flex items-center justify-between">
+          <div className="sticky bottom-0 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 bg-white border-t border-[#E5DAD3] grid grid-cols-2 gap-3 items-center">
             <button
               type="button"
               onClick={handleClose}
-              className="px-4 py-2 rounded-xl bg-[#F2EBE6] hover:bg-[#E8DED8] text-[#3A3034] font-bold"
+              className="min-h-12 w-full px-4 rounded-xl bg-[#F2EBE6] hover:bg-[#E8DED8] text-[#3A3034] font-bold"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs shadow-lg flex items-center gap-2 cursor-pointer transition-all"
+              className="min-h-12 w-full px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs shadow-lg flex items-center justify-center gap-2 cursor-pointer transition-all"
             >
               <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
               <span>FINALIZAR ETAPA & LIBERAR LOTE</span>

@@ -7,7 +7,8 @@ import {
   ProductionOrder,
   AuditLogEntry,
   FactoryAlert,
-  SystemSectorCode
+  SystemSectorCode,
+  CordMode
 } from '../types/mes';
 import { hashPassword } from '../utils/authCrypto';
 
@@ -19,6 +20,9 @@ export const SECTOR_DEFINITIONS = [
   { code: 'ESTAMPARIA' as SystemSectorCode, name: 'Estamparia & Serigrafia', description: 'Impressão localizada, sublimação e Carrossel' },
   { code: 'CORTE_SOLDA' as SystemSectorCode, name: 'Corte e Solda', description: 'Solda ultrassônica, corte e acabamento lateral' },
   { code: 'ALCA' as SystemSectorCode, name: 'Alça & Acabamento', description: 'Colocação de alça fita, vazada e passagem de cordão' },
+  { code: 'CORDAO_MANUAL' as SystemSectorCode, name: 'Cordão Manual', description: 'Aplicação manual de cordão em posto próprio, após o corte e solda' },
+  { code: 'COSTURA' as SystemSectorCode, name: 'Costura', description: 'Costura estrutural da sacola box antes da alça' },
+  { code: 'TERCEIRIZADO' as SystemSectorCode, name: 'Terceirizado', description: 'Recebimento e conferência de lote produzido fora da fábrica' },
   { code: 'EXPEDICAO' as SystemSectorCode, name: 'Expedição & Qualidade', description: 'Conferência técnica final, embalagem e expedição' },
 ];
 
@@ -88,8 +92,8 @@ export const INITIAL_PROCESS_TYPES: ProcessType[] = [
   {
     id: 'proc_passar_fio',
     code: 'FIO',
-    name: 'Passar Fio / Cordão',
-    description: 'Inserção manual ou assistida de cordão em mochilinha/sacos',
+    name: 'Cordão Manual',
+    description: 'Aplicação manual do cordão, em posto próprio, depois do corte e solda',
     defaultUnit: 'UNIDADES',
     standardSetupMinutes: 10,
   },
@@ -126,6 +130,22 @@ export const INITIAL_PROCESS_TYPES: ProcessType[] = [
     description: 'Inspeção de qualidade, dobra, remoção de rebarbas e contagem',
     defaultUnit: 'UNIDADES',
     standardSetupMinutes: 10,
+  },
+  {
+    id: 'proc_costura',
+    code: 'COS',
+    name: 'Costura',
+    description: 'Costura estrutural da sacola box antes da aplicação da alça',
+    defaultUnit: 'UNIDADES',
+    standardSetupMinutes: 15,
+  },
+  {
+    id: 'proc_terceirizado',
+    code: 'TER',
+    name: 'Produção Terceirizada',
+    description: 'Etapa executada fora da fábrica; o posto registra o recebimento do lote pronto',
+    defaultUnit: 'UNIDADES',
+    standardSetupMinutes: 0,
   },
   {
     id: 'proc_qualidade',
@@ -322,6 +342,101 @@ export const INITIAL_MACHINES: Machine[] = [
     authorizedOperatorIds: ['user_op_serigrafia'],
     historicalEfficiencyFactor: 0.85,
     capabilities: { observacoes: 'A VALIDAR NA FÁBRICA' }
+  },
+  {
+    id: 'workstation_proc_colocar_alca',
+    code: 'ALC-01',
+    name: 'Posto de Alça & Acabamento',
+    sector: 'Alça e Acabamento',
+    processTypeId: 'proc_colocar_alca',
+    status: 'DISPONIVEL',
+    isActive: true,
+    nominalSpeed: 0,
+    productionUnit: 'UNIDADES',
+    compatibleProducts: ['*'],
+    compatibleMaterials: ['TNT', 'TNT Laminado', 'Algodão Cru'],
+    grammageRange: { min: 0, max: 9999 },
+    widthRange: { min: 0, max: 9999 },
+    currentShift: 'TURNO_1',
+    authorizedOperatorIds: ['*'],
+    historicalEfficiencyFactor: 0.9,
+    capabilities: { observacoes: 'Posto manual de aplicação de alça fita e acabamento' }
+  },
+  {
+    id: 'workstation_proc_cordao_manual',
+    code: 'CDM-01',
+    name: 'Posto de Cordão Manual',
+    sector: 'Cordão Manual',
+    processTypeId: 'proc_passar_fio',
+    status: 'DISPONIVEL',
+    isActive: true,
+    nominalSpeed: 0,
+    productionUnit: 'UNIDADES',
+    compatibleProducts: ['*'],
+    compatibleMaterials: ['TNT', 'TNT Laminado', 'Algodão Cru'],
+    grammageRange: { min: 0, max: 9999 },
+    widthRange: { min: 0, max: 9999 },
+    currentShift: 'TURNO_1',
+    authorizedOperatorIds: ['*'],
+    historicalEfficiencyFactor: 0.9,
+    capabilities: { observacoes: 'Posto manual de aplicação de cordão, depois do corte e solda' }
+  },
+  {
+    id: 'workstation_proc_costura',
+    code: 'COS-01',
+    name: 'Posto de Costura',
+    sector: 'Costura',
+    processTypeId: 'proc_costura',
+    status: 'DISPONIVEL',
+    isActive: true,
+    nominalSpeed: 0,
+    productionUnit: 'UNIDADES',
+    compatibleProducts: ['*'],
+    compatibleMaterials: ['TNT', 'TNT Laminado', 'Algodão Cru'],
+    grammageRange: { min: 0, max: 9999 },
+    widthRange: { min: 0, max: 9999 },
+    currentShift: 'TURNO_1',
+    authorizedOperatorIds: ['*'],
+    historicalEfficiencyFactor: 0.9,
+    capabilities: { observacoes: 'Costura estrutural da sacola box' }
+  },
+  {
+    id: 'workstation_proc_terceirizado',
+    code: 'TER-01',
+    name: 'Recebimento Terceirizado',
+    sector: 'Terceirizado',
+    processTypeId: 'proc_terceirizado',
+    status: 'DISPONIVEL',
+    isActive: true,
+    nominalSpeed: 0,
+    productionUnit: 'UNIDADES',
+    compatibleProducts: ['*'],
+    compatibleMaterials: ['TNT', 'TNT Laminado', 'Algodão Cru'],
+    grammageRange: { min: 0, max: 9999 },
+    widthRange: { min: 0, max: 9999 },
+    currentShift: 'TURNO_1',
+    authorizedOperatorIds: ['*'],
+    historicalEfficiencyFactor: 0.9,
+    capabilities: { observacoes: 'Registro do lote produzido fora da fábrica' }
+  },
+  {
+    id: 'workstation_proc_expedicao',
+    code: 'EXP-01',
+    name: 'Expedição & Embalagem',
+    sector: 'Expedição',
+    processTypeId: 'proc_expedicao',
+    status: 'DISPONIVEL',
+    isActive: true,
+    nominalSpeed: 0,
+    productionUnit: 'UNIDADES',
+    compatibleProducts: ['*'],
+    compatibleMaterials: ['TNT', 'TNT Laminado', 'Algodão Cru'],
+    grammageRange: { min: 0, max: 9999 },
+    widthRange: { min: 0, max: 9999 },
+    currentShift: 'TURNO_1',
+    authorizedOperatorIds: ['*'],
+    historicalEfficiencyFactor: 0.9,
+    capabilities: { observacoes: 'Conferência final, embalagem e liberação para coleta' }
   }
 ];
 
@@ -522,7 +637,117 @@ export const INITIAL_PRODUCTS: ProductTechnicalSpec[] = [
     requiresVisor: false,
     requiresWelding: true,
     requiresCutting: true,
+  },,
+  {
+    id: 'prod_sacola_presente',
+    code: 'BT-SPR-01',
+    name: 'Sacola de Presente',
+    family: 'Presente',
+    material: 'TNT',
+    allowedGrammages: [60, 70, 80, 100],
+    standardWidths: [200, 250, 300, 350],
+    standardHeights: [250, 300, 350, 400],
+    hasGusset: true,
+    allowedPrintingTypes: ['FLEXOGRAFIA', 'SERIGRAFIA', 'SEM_IMPRESSAO'],
+    defaultProcessSequence: ['proc_solda', 'proc_passar_fio', 'proc_colocar_alca'],
+    compatibleMachineIds: [],
+    unit: 'UNIDADES',
+    manufacturingRules: ['Cordão sempre manual, aplicado antes da alça',
+      'Alça fita aplicada no posto de acabamento'],
+    requiresHandle: true,
+    handleTypes: ['FITA'],
+    requiresDrawstring: true,
+    requiresVisor: false,
+    requiresWelding: true,
+    requiresCutting: true,
   },
+  {
+    id: 'prod_saco_presente',
+    code: 'BT-SCP-01',
+    name: 'Saco de Presente',
+    family: 'Presente',
+    material: 'TNT',
+    allowedGrammages: [60, 70, 80],
+    standardWidths: [150, 200, 250, 300],
+    standardHeights: [200, 250, 300, 350],
+    hasGusset: false,
+    allowedPrintingTypes: ['FLEXOGRAFIA', 'SERIGRAFIA', 'SEM_IMPRESSAO'],
+    defaultProcessSequence: ['proc_solda', 'proc_passar_fio'],
+    compatibleMachineIds: [],
+    unit: 'UNIDADES',
+    manufacturingRules: ['Cordão sempre manual',
+      'Não leva alça'],
+    requiresHandle: false,
+    requiresDrawstring: true,
+    requiresVisor: false,
+    requiresWelding: true,
+    requiresCutting: true,
+  },
+  {
+    id: 'prod_ecobag_algodao',
+    code: 'BT-ECO-01',
+    name: 'Ecobag de Algodão',
+    family: 'Algodão',
+    material: 'Algodão Cru',
+    allowedGrammages: [0],
+    standardWidths: [300, 350, 400],
+    standardHeights: [400, 420, 450],
+    hasGusset: false,
+    allowedPrintingTypes: ['SERIGRAFIA', 'ESTAMPARIA'],
+    defaultProcessSequence: ['proc_serigrafia', 'proc_expedicao'],
+    compatibleMachineIds: [],
+    unit: 'UNIDADES',
+    manufacturingRules: ['Chega pronta de fornecedor: não passa por refile, flexografia, corte e solda ou costura',
+      'Somente estamparia e expedição'],
+    requiresHandle: false,
+    requiresDrawstring: false,
+    requiresVisor: false,
+    requiresWelding: false,
+    requiresCutting: false,
+  },
+  {
+    id: 'prod_lixo_car',
+    code: 'BT-LXC-01',
+    name: 'Lixo Car',
+    family: 'Automotivo',
+    material: 'TNT',
+    allowedGrammages: [40, 60, 80],
+    standardWidths: [150, 180, 200],
+    standardHeights: [200, 220, 250],
+    hasGusset: false,
+    allowedPrintingTypes: ['FLEXOGRAFIA', 'SERIGRAFIA', 'SEM_IMPRESSAO'],
+    defaultProcessSequence: ['proc_solda'],
+    compatibleMachineIds: [],
+    unit: 'UNIDADES',
+    manufacturingRules: ['Mesma lógica da sacola alça vazada: sem etapa de alça'],
+    requiresHandle: false,
+    requiresDrawstring: false,
+    requiresVisor: false,
+    requiresWelding: true,
+    requiresCutting: true,
+  },
+  {
+    id: 'prod_saquinho_algodao',
+    code: 'BT-SQA-01',
+    name: 'Saquinho de Algodão',
+    family: 'Algodão',
+    material: 'Algodão Cru',
+    allowedGrammages: [0],
+    standardWidths: [100, 150, 200, 250],
+    standardHeights: [150, 200, 250, 300],
+    hasGusset: false,
+    allowedPrintingTypes: ['SERIGRAFIA', 'ESTAMPARIA'],
+    defaultProcessSequence: ['proc_terceirizado', 'proc_serigrafia', 'proc_expedicao'],
+    compatibleMachineIds: [],
+    unit: 'UNIDADES',
+    manufacturingRules: ['Fabricação inicial terceirizada fora da fábrica',
+      'Após o recebimento segue para estamparia e expedição'],
+    requiresHandle: false,
+    requiresDrawstring: true,
+    requiresVisor: false,
+    requiresWelding: false,
+    requiresCutting: false,
+  }
 ];
 
 export const INITIAL_ROUTING_RULES: RoutingRule[] = [
@@ -592,3 +817,253 @@ export const INITIAL_AUDIT_LOGS: AuditLogEntry[] = [];
 
 export const INITIAL_ALERTS: FactoryAlert[] = [];
 
+
+
+// =====================================================================
+// REGRAS OFICIAIS DE ROTEIRO DE PRODUCAO
+// Fonte unica usada pelo PCP (mesStore) e pelo motor do servidor (routingEngine).
+// Regra mestra: REFILE **XOR** FLEXOGRAFIA. Flexografia e Carrossel nunca
+// executam a mesma impressao na mesma OP.
+// =====================================================================
+
+export type PrintingPath = "FLEXOGRAFIA" | "CARROSSEL" | "SEM_IMPRESSAO" | "NAO_IDENTIFICADO";
+
+export type { CordMode };
+
+export type ProductKey =
+  | "SACOLA_ALCA_FITA"
+  | "SACOLA_ALCA_VAZADA"
+  | "SACO_TNT"
+  | "MOCHILINHA"
+  | "SACOLA_PRESENTE"
+  | "SACO_PRESENTE"
+  | "SACOLA_BOX"
+  | "ECOBAG_ALGODAO"
+  | "LIXO_CAR"
+  | "SAQUINHO_ALGODAO"
+  | "NAO_IDENTIFICADO";
+
+/** Marcas que sempre usam cordao manual, por regra comercial fixa. */
+export const MANUAL_CORD_CLIENTS = ["arezzo", "anacapri", "sonho dos pes"];
+
+export interface BlueprintStep {
+  processTypeId: string;
+  processName: string;
+  sector: string;
+}
+
+export interface RouteBlueprintInput {
+  productName?: string;
+  productCode?: string;
+  model?: string;
+  client?: string;
+  printingMethod?: string;
+  handleType?: string;
+  hasCord?: boolean;
+  cordMode?: string;
+  hasWindow?: boolean;
+  /** Produto confirmado pelo PCP na tela de revisao. Vence a identificacao automatica. */
+  productKeyOverride?: ProductKey | string;
+}
+
+export interface RouteBlueprint {
+  productKey: ProductKey;
+  productLabel: string;
+  productCatalogId?: string;
+  printingPath: PrintingPath;
+  cordMode: CordMode;
+  cordForcedByClient: boolean;
+  requiresCordStep: boolean;
+  requiresHandleStep: boolean;
+  requiresSewing: boolean;
+  requiresOutsourcing: boolean;
+  steps: BlueprintStep[];
+  processIds: string[];
+  warnings: string[];
+  needsPcpValidation: boolean;
+}
+
+const ROUTE_STEP_CATALOG: Record<string, BlueprintStep> = {
+  proc_refile: { processTypeId: "proc_refile", processName: "Refile", sector: "Refile e Bobinagem" },
+  proc_flexografia: { processTypeId: "proc_flexografia", processName: "Flexografia", sector: "Flexografia" },
+  proc_serigrafia: { processTypeId: "proc_serigrafia", processName: "Estamparia / Carrossel", sector: "Estamparia" },
+  proc_solda: { processTypeId: "proc_solda", processName: "Corte e Solda", sector: "Corte e Solda" },
+  proc_passar_fio: { processTypeId: "proc_passar_fio", processName: "Cordão Manual", sector: "Cordão Manual" },
+  proc_costura: { processTypeId: "proc_costura", processName: "Costura", sector: "Costura" },
+  proc_colocar_alca: { processTypeId: "proc_colocar_alca", processName: "Colocar Alça / Acabamento", sector: "Acabamento" },
+  proc_terceirizado: { processTypeId: "proc_terceirizado", processName: "Produção Terceirizada", sector: "Terceirizado" },
+  proc_expedicao: { processTypeId: "proc_expedicao", processName: "Expedição & Embalagem", sector: "Expedição" },
+};
+
+interface ProductRule {
+  label: string;
+  catalogId?: string;
+  flow: "PADRAO" | "ECOBAG" | "TERCEIRIZADO";
+  handleStep: boolean;
+  sewing: boolean;
+  cordFixedManual: boolean;
+}
+
+const PRODUCT_RULES: Record<ProductKey, ProductRule> = {
+  SACOLA_ALCA_FITA: { label: "Sacola Alça Fita", catalogId: "prod_sacola_alca_fita", flow: "PADRAO", handleStep: true, sewing: false, cordFixedManual: false },
+  SACOLA_ALCA_VAZADA: { label: "Sacola Alça Vazada", catalogId: "prod_sacola_alca_vazada", flow: "PADRAO", handleStep: false, sewing: false, cordFixedManual: false },
+  SACO_TNT: { label: "Saco de TNT", catalogId: "prod_saco_sem_visor", flow: "PADRAO", handleStep: false, sewing: false, cordFixedManual: false },
+  MOCHILINHA: { label: "Mochilinha", catalogId: "prod_mochilinha", flow: "PADRAO", handleStep: false, sewing: false, cordFixedManual: true },
+  SACOLA_PRESENTE: { label: "Sacola de Presente", catalogId: "prod_sacola_presente", flow: "PADRAO", handleStep: true, sewing: false, cordFixedManual: true },
+  SACO_PRESENTE: { label: "Saco de Presente", catalogId: "prod_saco_presente", flow: "PADRAO", handleStep: false, sewing: false, cordFixedManual: true },
+  SACOLA_BOX: { label: "Sacola Box", catalogId: "prod_sacola_box", flow: "PADRAO", handleStep: true, sewing: true, cordFixedManual: false },
+  ECOBAG_ALGODAO: { label: "Ecobag de Algodão", catalogId: "prod_ecobag_algodao", flow: "ECOBAG", handleStep: false, sewing: false, cordFixedManual: false },
+  LIXO_CAR: { label: "Lixo Car", catalogId: "prod_lixo_car", flow: "PADRAO", handleStep: false, sewing: false, cordFixedManual: false },
+  SAQUINHO_ALGODAO: { label: "Saquinho de Algodão", catalogId: "prod_saquinho_algodao", flow: "TERCEIRIZADO", handleStep: false, sewing: false, cordFixedManual: false },
+  NAO_IDENTIFICADO: { label: "Produto não identificado", flow: "PADRAO", handleStep: false, sewing: false, cordFixedManual: false },
+};
+
+function normalizeRouteText(value?: string): string {
+  return (value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+/** Identifica o produto pelo que a OP traz escrito. Ambiguo devolve NAO_IDENTIFICADO. */
+export function identifyProductKey(input: RouteBlueprintInput): ProductKey {
+  const hay = normalizeRouteText([input.productName, input.model, input.productCode].join(" "));
+  const handle = normalizeRouteText(input.handleType);
+
+  if (!hay.trim()) return "NAO_IDENTIFICADO";
+  if (hay.includes("saquinho") && hay.includes("algod")) return "SAQUINHO_ALGODAO";
+  if (hay.includes("ecobag") || hay.includes("eco bag")) return "ECOBAG_ALGODAO";
+  if (hay.includes("lixo car") || hay.includes("lixocar") || hay.includes("lixo de carro")) return "LIXO_CAR";
+  if (hay.includes(" box") || hay.includes("sacola box") || hay.endsWith("box")) return "SACOLA_BOX";
+  if (hay.includes("presente")) return hay.includes("sacola") ? "SACOLA_PRESENTE" : "SACO_PRESENTE";
+  if (hay.includes("mochil")) return "MOCHILINHA";
+  if (hay.includes("vazada")) return "SACOLA_ALCA_VAZADA";
+  if (hay.includes("fita")) return "SACOLA_ALCA_FITA";
+  if (hay.includes("saco")) return "SACO_TNT";
+  if (hay.includes("sacola")) {
+    if (handle === "vazada") return "SACOLA_ALCA_VAZADA";
+    if (handle === "fita") return "SACOLA_ALCA_FITA";
+  }
+  return "NAO_IDENTIFICADO";
+}
+
+/** Caminho de impressao. Refile e Flexografia sao alternativos, nunca somados. */
+export function resolvePrintingPath(printingMethod?: string): PrintingPath {
+  const printing = normalizeRouteText(printingMethod);
+  if (!printing) return "NAO_IDENTIFICADO";
+  if (printing.includes("flexo")) return "FLEXOGRAFIA";
+  if (
+    printing.includes("serigraf") ||
+    printing.includes("estampar") ||
+    printing.includes("carross") ||
+    printing.includes("silk")
+  ) {
+    return "CARROSSEL";
+  }
+  if (printing.includes("sem_impressao") || printing.includes("sem impressao") || printing.includes("liso")) {
+    return "SEM_IMPRESSAO";
+  }
+  return "NAO_IDENTIFICADO";
+}
+
+/**
+ * Monta o roteiro oficial da OP. Devolve tambem os avisos e se precisa do PCP.
+ * Nada aqui inventa etapa: informacao critica ambigua vira REVISAO_PCP.
+ */
+export function buildRouteBlueprint(input: RouteBlueprintInput): RouteBlueprint {
+  const warnings: string[] = [];
+  let needsPcpValidation = false;
+
+  const overrideKey = input.productKeyOverride as ProductKey | undefined;
+  const productKey: ProductKey =
+    overrideKey && overrideKey !== "NAO_IDENTIFICADO" && PRODUCT_RULES[overrideKey]
+      ? overrideKey
+      : identifyProductKey(input);
+
+  if (productKey === "NAO_IDENTIFICADO") {
+    needsPcpValidation = true;
+    warnings.push("Produto não identificado com segurança na OP. O PCP precisa confirmar o tipo antes de liberar.");
+  }
+
+  const rule = PRODUCT_RULES[productKey];
+
+  const printingPath = resolvePrintingPath(input.printingMethod);
+  if (printingPath === "NAO_IDENTIFICADO" && rule.flow === "PADRAO") {
+    needsPcpValidation = true;
+    warnings.push("Tipo de impressão não identificado: o PCP precisa definir entre Flexografia e Carrossel antes de liberar.");
+  }
+
+  // ---- cordao: automatico (na propria maquina) x manual (posto proprio) ----
+  const clientText = normalizeRouteText(input.client);
+  const cordForcedByClient = MANUAL_CORD_CLIENTS.some((brand) => clientText.includes(brand));
+  const declaredCord = normalizeRouteText(input.cordMode);
+  const opIndicatesCord =
+    Boolean(input.hasCord) || normalizeRouteText(input.handleType) === "cordao" || rule.cordFixedManual;
+
+  let cordMode: CordMode;
+  if (rule.cordFixedManual) {
+    cordMode = "MANUAL";
+  } else if (declaredCord.includes("manual")) {
+    cordMode = "MANUAL";
+  } else if (declaredCord.includes("automat")) {
+    cordMode = "AUTOMATICO";
+  } else if (declaredCord.includes("nenhum") || declaredCord.includes("sem")) {
+    cordMode = "NENHUM";
+  } else {
+    cordMode = opIndicatesCord ? "NAO_IDENTIFICADO" : "NENHUM";
+  }
+
+  if (cordForcedByClient) {
+    if (opIndicatesCord || cordMode !== "NENHUM") {
+      cordMode = "MANUAL";
+    } else {
+      needsPcpValidation = true;
+      warnings.push("Cliente com regra fixa de cordão manual, mas a OP não indica uso de cordão. Confirmar com o PCP.");
+    }
+  }
+
+  if (cordMode === "NAO_IDENTIFICADO") {
+    needsPcpValidation = true;
+    warnings.push("A OP indica cordão, mas não informa se é automático (na máquina) ou manual (posto próprio).");
+  }
+
+  // ---- montagem do roteiro ----
+  const processIds: string[] = [];
+
+  if (rule.flow === "ECOBAG") {
+    processIds.push("proc_serigrafia", "proc_expedicao");
+  } else if (rule.flow === "TERCEIRIZADO") {
+    processIds.push("proc_terceirizado", "proc_serigrafia", "proc_expedicao");
+  } else {
+    if (printingPath === "FLEXOGRAFIA") {
+      processIds.push("proc_flexografia", "proc_solda");
+    } else if (printingPath === "CARROSSEL") {
+      processIds.push("proc_refile", "proc_solda", "proc_serigrafia");
+    } else {
+      processIds.push("proc_refile", "proc_solda");
+    }
+
+    if (rule.sewing) processIds.push("proc_costura");
+    if (cordMode === "MANUAL") processIds.push("proc_passar_fio");
+    if (rule.handleStep) processIds.push("proc_colocar_alca");
+    processIds.push("proc_expedicao");
+  }
+
+  return {
+    productKey,
+    productLabel: rule.label,
+    productCatalogId: rule.catalogId,
+    printingPath,
+    cordMode,
+    cordForcedByClient,
+    requiresCordStep: cordMode === "MANUAL",
+    requiresHandleStep: rule.handleStep,
+    requiresSewing: rule.sewing,
+    requiresOutsourcing: rule.flow === "TERCEIRIZADO",
+    steps: processIds.map((id) => ROUTE_STEP_CATALOG[id]).filter(Boolean),
+    processIds,
+    warnings,
+    needsPcpValidation,
+  };
+}

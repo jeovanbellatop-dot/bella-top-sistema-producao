@@ -6,7 +6,7 @@ export interface OpProductThumbnailProps {
   layoutImage?: string;
   opNumber: string;
   productName?: string;
-  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' | '2xl';
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' | '2xl' | 'hero';
   interactive?: boolean;
   showFullLayoutBadge?: boolean;
   status?: 'available' | 'missing' | 'needs_validation';
@@ -39,6 +39,12 @@ const sizeConfig = {
     container: 'w-28 h-28 rounded-2xl',
     icon: 'w-8 h-8',
     textSize: 'text-xs',
+  },
+  // Foto em destaque no celular: ocupa a largura toda e volta a ser miniatura no desktop.
+  hero: {
+    container: 'w-full h-44 rounded-2xl sm:w-28 sm:h-28',
+    icon: 'w-10 h-10',
+    textSize: 'text-sm',
   },
   '2xl': {
     container: 'w-36 h-36 rounded-3xl',
@@ -96,7 +102,7 @@ export const OpProductThumbnail: React.FC<OpProductThumbnailProps> = ({
           {isClickable && (
             <div className="absolute inset-0 bg-[#1C1418]/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white backdrop-blur-[1px] gap-0.5">
               <ZoomIn className={`${cfg.icon} text-white drop-shadow`} />
-              {(size === 'lg' || size === 'xl' || size === '2xl') && (
+              {(size === 'lg' || size === 'xl' || size === '2xl' || size === 'hero') && (
                 <span className="text-[9px] font-extrabold uppercase tracking-wider text-[#F5C6DC]">
                   Ver Layout
                 </span>
@@ -105,7 +111,7 @@ export const OpProductThumbnail: React.FC<OpProductThumbnailProps> = ({
           )}
 
           {/* Badge para tamanhos maiores */}
-          {showFullLayoutBadge && (size === 'xl' || size === '2xl') && (
+          {showFullLayoutBadge && (size === 'xl' || size === '2xl' || size === 'hero') && (
             <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-[#1C1418]/80 text-[#F5C6DC] text-[8px] font-mono font-bold flex items-center gap-1 backdrop-blur-sm pointer-events-none">
               <Layers className="w-2.5 h-2.5" />
               <span>Layout</span>
@@ -116,7 +122,7 @@ export const OpProductThumbnail: React.FC<OpProductThumbnailProps> = ({
         /* Fallback quando não há imagem identificada */
         <div className="w-full h-full bg-[#FAF5F1] text-[#9A8B84] flex flex-col items-center justify-center p-1 text-center select-none">
           <ImageOff className={`${cfg.icon} text-[#9A8B84] opacity-70`} />
-          {(size === 'md' || size === 'lg' || size === 'xl' || size === '2xl') && (
+          {(size === 'md' || size === 'lg' || size === 'xl' || size === '2xl' || size === 'hero') && (
             <span className={`${cfg.textSize} text-[#6E615B] font-mono mt-0.5 line-clamp-1`}>
               Sem foto
             </span>
