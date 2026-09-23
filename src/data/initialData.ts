@@ -637,7 +637,7 @@ export const INITIAL_PRODUCTS: ProductTechnicalSpec[] = [
     requiresVisor: false,
     requiresWelding: true,
     requiresCutting: true,
-  },,
+  },
   {
     id: 'prod_sacola_presente',
     code: 'BT-SPR-01',

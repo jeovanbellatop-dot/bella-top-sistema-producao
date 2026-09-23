@@ -4,7 +4,13 @@
  */
 
 import { mesStore } from '../src/services/mesStore';
-import { INITIAL_USERS, buildRouteBlueprint } from '../src/data/initialData';
+import {
+  INITIAL_USERS,
+  INITIAL_PRODUCTS,
+  INITIAL_MACHINES,
+  PRODUCT_KEY_OPTIONS,
+  buildRouteBlueprint,
+} from '../src/data/initialData';
 import {
   validateFirestoreConnectivity,
   validateGoogleDriveConnectivity,
@@ -572,6 +578,30 @@ async function runAllTests() {
     bpDuvida.needsPcpValidation && bpDuvida.warnings.length > 0,
     'Produto e impressão ambíguos marcam a OP para REVISAO_PCP',
     JSON.stringify(bpDuvida.warnings)
+  );
+
+  // Catalogos nao podem ter furos (virgula dupla cria slot vazio e quebra o find()).
+  const catalogosIntegros =
+    INITIAL_PRODUCTS.every((p) => Boolean(p && p.id && p.code)) &&
+    INITIAL_PRODUCTS.length === Object.keys(INITIAL_PRODUCTS).length &&
+    INITIAL_MACHINES.every((m) => Boolean(m && m.id && m.processTypeId)) &&
+    INITIAL_MACHINES.length === Object.keys(INITIAL_MACHINES).length;
+  assert(
+    catalogosIntegros,
+    'Catálogos de produtos e máquinas sem entradas vazias',
+    `produtos: ${INITIAL_PRODUCTS.length}/${Object.keys(INITIAL_PRODUCTS).length}, maquinas: ${INITIAL_MACHINES.length}/${Object.keys(INITIAL_MACHINES).length}`
+  );
+
+  // Todo produto do roteiro precisa existir no catálogo, senão a OP quebra na criação.
+  const produtosDoRoteiro = PRODUCT_KEY_OPTIONS.filter((o) => o.key !== 'NAO_IDENTIFICADO');
+  const semCatalogo = produtosDoRoteiro.filter((o) => {
+    const bp = buildRouteBlueprint({ productKeyOverride: o.key, productName: o.label, printingMethod: 'FLEXOGRAFIA' });
+    return bp.productCatalogId ? !INITIAL_PRODUCTS.some((p) => p && p.id === bp.productCatalogId) : false;
+  });
+  assert(
+    semCatalogo.length === 0,
+    'Todo produto do roteiro tem cadastro correspondente no catálogo',
+    semCatalogo.map((o) => o.key).join(', ')
   );
 
   // O PCP confirma o produto na tela: o override vence a identificação automática
