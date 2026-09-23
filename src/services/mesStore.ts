@@ -2773,8 +2773,9 @@ class MesStore {
     }
 
     // Quando o PCP define o roteiro na mao, ainda precisamos do blueprint para
-    // registrar cordao/produto na OP. A validacao do PCP ja aconteceu na tela,
-    // entao needsPcpValidation nao pode reabrir a revisao nesse caminho.
+    // registrar cordao/produto na OP. O produto confirmado pelo PCP na tela
+    // entra como override: se ele confirmou, o roteiro nao volta para revisao
+    // por produto; se deixou como nao identificado, a OP vai para REVISAO_PCP.
     const manualBlueprint: RouteBlueprint | null = customSteps
       ? {
           ...buildRouteBlueprint({
@@ -2789,7 +2790,6 @@ class MesStore {
             hasWindow: opData.usoVisor,
             productKeyOverride: opData.produtoConfirmadoPcp || opData.produtoSugeridoIa,
           }),
-          needsPcpValidation: false,
         }
       : null;
 

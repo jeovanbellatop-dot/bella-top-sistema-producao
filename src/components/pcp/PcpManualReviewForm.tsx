@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ExtractedOpData } from '../../types/mes';
+import { PRODUCT_KEY_OPTIONS, getProductKeyLabel } from '../../data/initialData';
 import {
   Save,
   X,
@@ -49,6 +50,8 @@ export const PcpManualReviewForm: React.FC<PcpManualReviewFormProps> = ({
     numeroCores: initialData.numeroCores ?? 1,
     impressaoFrente: initialData.impressaoFrente || 'Conforme Layout',
     impressaoVerso: initialData.impressaoVerso || 'Sem impressão',
+    produtoConfirmadoPcp:
+      initialData.produtoConfirmadoPcp || initialData.produtoSugeridoIa || 'NAO_IDENTIFICADO',
     tipoAlca: (initialData.tipoAlca || 'VAZADA') as 'VAZADA' | 'FITA' | 'CORDAO' | 'NENHUMA',
     usoCordao: Boolean(initialData.usoCordao),
     usoVisor: Boolean(initialData.usoVisor),
@@ -127,6 +130,12 @@ export const PcpManualReviewForm: React.FC<PcpManualReviewFormProps> = ({
     if (initialData.tipoImpressao !== formData.tipoImpressao) {
       diffs.push(`Impressão: "${initialData.tipoImpressao}" -> "${formData.tipoImpressao}"`);
     }
+    const produtoAnterior = initialData.produtoConfirmadoPcp || initialData.produtoSugeridoIa || 'NAO_IDENTIFICADO';
+    if (produtoAnterior !== formData.produtoConfirmadoPcp) {
+      diffs.push(
+        `Produto do roteiro: "${getProductKeyLabel(produtoAnterior)}" -> "${getProductKeyLabel(formData.produtoConfirmadoPcp)}"`
+      );
+    }
     if (initialData.tipoAlca !== formData.tipoAlca) {
       diffs.push(`Alça: "${initialData.tipoAlca}" -> "${formData.tipoAlca}"`);
     }
@@ -162,6 +171,7 @@ export const PcpManualReviewForm: React.FC<PcpManualReviewFormProps> = ({
       numeroCores: Number(formData.numeroCores),
       impressaoFrente: formData.impressaoFrente.trim(),
       impressaoVerso: formData.impressaoVerso.trim(),
+      produtoConfirmadoPcp: formData.produtoConfirmadoPcp,
       tipoAlca: formData.tipoAlca,
       usoCordao: formData.usoCordao,
       usoVisor: formData.usoVisor,
@@ -545,6 +555,30 @@ export const PcpManualReviewForm: React.FC<PcpManualReviewFormProps> = ({
             <Sparkles className="w-4 h-4 text-[#E30A78]" />
             <span>4. Alça, Acessórios & Acabamento</span>
           </h5>
+
+          <div>
+            <label className="block text-[11px] font-bold text-[#1C1418] mb-1">
+              Produto do Roteiro (confirmação do PCP)
+            </label>
+            <select
+              value={formData.produtoConfirmadoPcp}
+              onChange={(e) => setFormData({ ...formData, produtoConfirmadoPcp: e.target.value })}
+              className="w-full bg-white border border-[#E5DAD3] rounded-xl px-3 py-2 text-xs font-bold text-[#1C1418] focus:outline-none focus:ring-2 focus:ring-[#E30A78]"
+            >
+              {PRODUCT_KEY_OPTIONS.map((opt) => (
+                <option key={opt.key} value={opt.key}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <p className="text-[10px] text-[#6E615B] mt-1 leading-relaxed">
+              Sugestão da IA:{' '}
+              <span className="font-bold text-[#3A3034]">
+                {getProductKeyLabel(initialData.produtoSugeridoIa)}
+              </span>
+              . O produto define as etapas obrigatórias do roteiro (costura, alça, cordão).
+            </p>
+          </div>
 
           <div>
             <label className="block text-[11px] font-bold text-[#1C1418] mb-1">

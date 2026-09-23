@@ -574,6 +574,35 @@ async function runAllTests() {
     JSON.stringify(bpDuvida.warnings)
   );
 
+  // O PCP confirma o produto na tela: o override vence a identificação automática
+  // e tira a OP da fila de revisão quando o resto dos dados está completo.
+  const bpConfirmado = buildRouteBlueprint({
+    productName: 'Sacola',
+    printingMethod: 'CARROSSEL',
+    handleType: '',
+    productKeyOverride: 'SACOLA_BOX',
+  });
+  assert(
+    bpConfirmado.productKey === 'SACOLA_BOX' &&
+      bpConfirmado.processIds.includes('proc_costura') &&
+      !bpConfirmado.needsPcpValidation,
+    'PCP confirma o produto na tela e o roteiro passa a seguir a regra do produto confirmado',
+    bpConfirmado.processIds.join(' -> ')
+  );
+
+  // Se o PCP nao confirmar (deixar como nao identificado), a OP continua em revisão.
+  const bpSemConfirmacao = buildRouteBlueprint({
+    productName: 'Sacola',
+    printingMethod: 'CARROSSEL',
+    handleType: '',
+    productKeyOverride: 'NAO_IDENTIFICADO',
+  });
+  assert(
+    bpSemConfirmacao.needsPcpValidation,
+    'Produto deixado como não identificado mantém a OP em REVISAO_PCP',
+    JSON.stringify(bpSemConfirmacao.warnings)
+  );
+
   console.log(`\n${colors.cyan}--- 8. DIAGNÓSTICO E CONECTIVIDADE (FIRESTORE & DRIVE) ---${colors.reset}`);
 
   // Teste 8.1: Validação de conectividade real do Firestore (firebase-admin)

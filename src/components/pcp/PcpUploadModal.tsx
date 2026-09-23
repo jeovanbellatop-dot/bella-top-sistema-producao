@@ -31,6 +31,7 @@ import { PcpManualReviewForm } from './PcpManualReviewForm';
 import { CropBox, createBellaTopBagSvg } from '../../utils/imageCropper';
 import { processDocumentFile } from '../../utils/pdfRenderer';
 import { loadFileOnce, type LoadedFile } from '../../utils/loadedFile';
+import { PRODUCT_KEY_OPTIONS, getProductKeyLabel } from '../../data/initialData';
 
 interface PcpUploadModalProps {
   isOpen: boolean;
@@ -215,6 +216,20 @@ export const PcpUploadModal: React.FC<PcpUploadModalProps> = ({
         layoutCropBox: cropBox,
         productThumbnailStatus: 'available',
       });
+    }
+  };
+
+  // O PCP confirma (ou corrige) o produto identificado pela IA. O roteiro e
+  // recalculado na hora, porque o produto define as etapas obrigatorias.
+  const handleConfirmProduct = (productKey: string) => {
+    if (!extractedData) return;
+    const updated: ExtractedOpData = { ...extractedData, produtoConfirmadoPcp: productKey };
+    setExtractedData(updated);
+    try {
+      const newRoute = generateRouteForOpData(updated);
+      setEditableRoute(newRoute.steps);
+    } catch (e) {
+      console.warn('Erro ao recalcular roteiro apos confirmacao de produto:', e);
     }
   };
 
@@ -937,6 +952,42 @@ export const PcpUploadModal: React.FC<PcpUploadModalProps> = ({
                           <span className="text-[11px] text-[#6E615B] font-mono">
                             {editableRoute.length} Operações
                           </span>
+                        </div>
+
+                        {/* Confirmacao do produto pelo PCP: a IA sugere, o PCP confirma. */}
+                        <div className="bg-white border border-[#E5DAD3] rounded-xl p-3 space-y-2">
+                          <div className="flex items-center gap-1.5">
+                            <UserCheck className="w-3.5 h-3.5 text-[#E30A78]" />
+                            <span className="font-black text-[10px] uppercase tracking-widest text-[#B30A5C]">
+                              Produto do roteiro (confirmação do PCP)
+                            </span>
+                          </div>
+                          <select
+                            value={
+                              extractedData.produtoConfirmadoPcp ||
+                              extractedData.produtoSugeridoIa ||
+                              'NAO_IDENTIFICADO'
+                            }
+                            onChange={(e) => handleConfirmProduct(e.target.value)}
+                            className="w-full px-3 py-2 rounded-lg border border-[#E5DAD3] bg-white text-xs font-bold text-[#1C1418] focus:outline-none focus:ring-2 focus:ring-[#E30A78]/40 cursor-pointer"
+                          >
+                            {PRODUCT_KEY_OPTIONS.map((opt) => (
+                              <option key={opt.key} value={opt.key}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                          <p className="text-[10px] text-[#6E615B] leading-relaxed">
+                            Sugestão da IA:{' '}
+                            <span className="font-bold text-[#3A3034]">
+                              {getProductKeyLabel(extractedData.produtoSugeridoIa)}
+                            </span>
+                            {extractedData.produtoConfirmadoPcp &&
+                              extractedData.produtoConfirmadoPcp !== extractedData.produtoSugeridoIa && (
+                                <span className="text-[#B30A5C] font-bold"> · corrigido pelo PCP</span>
+                              )}
+                            . Trocar o produto refaz o roteiro abaixo.
+                          </p>
                         </div>
 
                         <div className="space-y-2 max-h-72 overflow-y-auto pr-1">

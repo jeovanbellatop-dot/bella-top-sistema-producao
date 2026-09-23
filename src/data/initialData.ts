@@ -918,6 +918,17 @@ const PRODUCT_RULES: Record<ProductKey, ProductRule> = {
   NAO_IDENTIFICADO: { label: "Produto não identificado", flow: "PADRAO", handleStep: false, sewing: false, cordFixedManual: false },
 };
 
+/** Lista de produtos para o PCP confirmar/corrigir o roteiro na tela. */
+export const PRODUCT_KEY_OPTIONS: Array<{ key: ProductKey; label: string }> = (
+  Object.keys(PRODUCT_RULES) as ProductKey[]
+).map((key) => ({ key, label: PRODUCT_RULES[key].label }));
+
+/** Nome amigavel de um produto do roteiro. */
+export function getProductKeyLabel(key?: string): string {
+  const rule = key ? PRODUCT_RULES[key as ProductKey] : undefined;
+  return rule ? rule.label : "Produto não identificado";
+}
+
 function normalizeRouteText(value?: string): string {
   return (value || "")
     .normalize("NFD")
@@ -940,11 +951,14 @@ export function identifyProductKey(input: RouteBlueprintInput): ProductKey {
   if (hay.includes("mochil")) return "MOCHILINHA";
   if (hay.includes("vazada")) return "SACOLA_ALCA_VAZADA";
   if (hay.includes("fita")) return "SACOLA_ALCA_FITA";
-  if (hay.includes("saco")) return "SACO_TNT";
+  // "sacola" contem "saco": a sacola precisa ser testada primeiro para nao
+  // virar Saco de TNT e perder a etapa de alca.
   if (hay.includes("sacola")) {
     if (handle === "vazada") return "SACOLA_ALCA_VAZADA";
     if (handle === "fita") return "SACOLA_ALCA_FITA";
+    return "NAO_IDENTIFICADO";
   }
+  if (hay.includes("saco")) return "SACO_TNT";
   return "NAO_IDENTIFICADO";
 }
 
